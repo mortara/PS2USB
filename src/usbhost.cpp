@@ -1,27 +1,106 @@
 #include "usbhost.h"    
 
 void MyEspUsbHostClass::onKeyboardKey(uint8_t ascii, uint8_t keycode, uint8_t modifier) {
-    if (' ' <= ascii && ascii <= '~') {
-      WebSerialLogger.printf("%c", ascii);
-    } else if (ascii == '\r') {
-      WebSerialLogger.println();
-    }
+    
+
+    String str = "Keyboard: " +  String(ascii) + " " + String(keycode) + " " + String(modifier);
+    WebSerialLogger.println(str);
+    
+
     switch (keycode)
     {
-      case '0':
-        PS2Devices.Type(esp32_ps2dev::scancodes::Key::K_0);
+      case 69:
+        PS2Devices.Type(esp32_ps2dev::scancodes::Key::K_F12);
+        break;
+      case 68:
+        PS2Devices.Type(esp32_ps2dev::scancodes::Key::K_F11);
+        break;
+      case 67:
+        PS2Devices.Type(esp32_ps2dev::scancodes::Key::K_F10);
+        break;
+      case 66:
+        PS2Devices.Type(esp32_ps2dev::scancodes::Key::K_F9);
+        break;
+      case 65:
+        PS2Devices.Type(esp32_ps2dev::scancodes::Key::K_F8);
+        break;
+      case 64:
+        PS2Devices.Type(esp32_ps2dev::scancodes::Key::K_F7);
+        break;
+      case 63:
+        PS2Devices.Type(esp32_ps2dev::scancodes::Key::K_F6);
+        break;
+      case 62:
+        PS2Devices.Type(esp32_ps2dev::scancodes::Key::K_F5);
+        break;
+      case 61:
+        PS2Devices.Type(esp32_ps2dev::scancodes::Key::K_F4);
+        break;
+      case 60:
+        PS2Devices.Type(esp32_ps2dev::scancodes::Key::K_F3);
+        break;
+      case 59:
+        PS2Devices.Type(esp32_ps2dev::scancodes::Key::K_F2);
+        break;
+      case 58:
+        PS2Devices.Type(esp32_ps2dev::scancodes::Key::K_F1);
         break;
       
       default:
-        PS2Devices.Type((esp32_ps2dev::scancodes::Key)keycode);
+        PS2Devices.Type((char)ascii);
         break;
     }
   };
 
-void MyEspUsbHostClass::onMouseMoved(int16_t x, int16_t y, int8_t wheel) {
-    WebSerialLogger.printf("Mouse moved: x=%d, y=%d, wheel=%d\n", x, y, wheel);
-    PS2Devices.MoveMouse(x, y, wheel);
+void MyEspUsbHostClass::onMouse(hid_mouse_report_t report, uint8_t last_buttons) {
+
+    String str = "OnMouse: " + String(report.x) + " " + String(report.y) + " " + String(report.wheel) + " " + String(last_buttons);
+
+    Serial.println(str);
+    PS2Devices.MoveMouse(report.x, -report.y, report.wheel);
 };
+
+void MyEspUsbHostClass::onMouseMove(hid_mouse_report_t report) {
+
+    //String str = "onMouseMove: " + String(report.x) + " " + String(report.y) + " " + String(report.wheel);
+
+    //Serial.println(str);
+    //PS2Devices.MoveMouse((int16_t)report.x, (int16_t)report.y, report.wheel);
+};
+
+void MyEspUsbHostClass::onMouseButtons(hid_mouse_report_t report, uint8_t last_buttons)
+{
+    // LEFT
+    if (!(last_buttons & MOUSE_BUTTON_LEFT) && (report.buttons & MOUSE_BUTTON_LEFT)) {
+      Serial.println("Mouse LEFT Click");
+      PS2Devices.PressMouseButton(esp32_ps2dev::PS2Mouse::Button::LEFT);
+    }
+    if ((last_buttons & MOUSE_BUTTON_LEFT) && !(report.buttons & MOUSE_BUTTON_LEFT)) {
+      Serial.println("Mouse LEFT Release");
+      PS2Devices.ReleaseMouseButton(esp32_ps2dev::PS2Mouse::Button::LEFT);
+    }
+
+    // RIGHT
+    if (!(last_buttons & MOUSE_BUTTON_RIGHT) && (report.buttons & MOUSE_BUTTON_RIGHT)) {
+      Serial.println("Mouse RIGHT Click");
+      PS2Devices.PressMouseButton(esp32_ps2dev::PS2Mouse::Button::LEFT);
+    }
+    if ((last_buttons & MOUSE_BUTTON_RIGHT) && !(report.buttons & MOUSE_BUTTON_RIGHT)) {
+      Serial.println("Mouse RIGHT Release");
+      PS2Devices.ReleaseMouseButton(esp32_ps2dev::PS2Mouse::Button::LEFT);
+    }
+
+    // MIDDLE
+    if (!(last_buttons & MOUSE_BUTTON_MIDDLE) && (report.buttons & MOUSE_BUTTON_MIDDLE)) {
+      Serial.println("Mouse MIDDLE Click");
+      PS2Devices.PressMouseButton(esp32_ps2dev::PS2Mouse::Button::LEFT);
+    }
+    if ((last_buttons & MOUSE_BUTTON_MIDDLE) && !(report.buttons & MOUSE_BUTTON_MIDDLE)) {
+      Serial.println("Mouse MIDDLE Release");
+      PS2Devices.ReleaseMouseButton(esp32_ps2dev::PS2Mouse::Button::LEFT);
+    }
+
+}
 
 void MyEspUsbHostClass::onConfigured() {
     WebSerialLogger.println("USB device configured");
@@ -31,9 +110,22 @@ void MyEspUsbHostClass::onConnect() {
       WebSerialLogger.println("USB device connected");
 };
 
-void MyEspUsbHostClass::begin() {
-    EspUsbHost::begin();
+void MyEspUsbHostClass::init()
+{
+    this->begin();
     setHIDLocal(HID_LOCAL);
+}
+
+void MyEspUsbHostClass::DisplayInfo()
+{
+    WebSerialLogger.print("[*] USB information:");
+    
+    for(int i = 0; i < 17; i++)
+    {
+      endpoint_data_t ep = this->endpoint_data_list[i];
+      String str = String(ep.bInterfaceNumber) + " " + String(ep.bInterfaceClass) + " " + String(ep.bInterfaceProtocol) + " " + String(ep.bCountryCode);
+      WebSerialLogger.println(str);
+    }
 }
 
 MyEspUsbHostClass MyEspUsbHost;

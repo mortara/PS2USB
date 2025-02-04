@@ -1,10 +1,11 @@
 #include "main.h"
 
+bool setup_done = false;
 bool ota_only_mode = false;
 bool ota_running = false;
 unsigned long ota_timer = 0;
 
-const int SWITCH_PINS[] = { 26, 27, 14, 12 };
+const int SWITCH_PINS[] = { 38, 27, 14, 12 };
 
 void start_ota()
 {
@@ -78,9 +79,8 @@ void setup() {
       PS2Devices.InitMouse(MOUSE_CLK,MOUSE_DATA);
 
       Serial.println("Initializing USB Host...");
-      MyEspUsbHost.begin();
+      MyEspUsbHost.init();
       
-
       Serial.println("Starting wifi connection...");
       WIFIManager.Connect();
 
@@ -88,14 +88,20 @@ void setup() {
       WebServer.Setup();
     }
 
+    setup_done = true;
 }
 
 void loop() {
   
+  if(!setup_done)
+  {
+    return;
+  }
+
   unsigned long now = millis();
     WIFIManager.Loop();
 
-   if(now - ota_timer > 100UL)
+    if(now - ota_timer > 100UL)
     {
      
       if(ota_running)
@@ -114,59 +120,47 @@ void loop() {
     }
 
     if(WiFi.isConnected() && !WebSerialLogger.IsRunning())
+    {
           WebSerialLogger.Begin(WebServer.GetServer());
-
+    }
+    
     MyEspUsbHost.task(); 
 
     char ch = -1;
+  
     if (Serial.available()>0)
     {
         ch = Serial.read();
-
-        switch(ch)
-        {
-            case 'w':
-                PS2Devices.MoveMouse(0, 10, 0);
-                WebSerialLogger.println("w");
-                break;
-            case 's':
-                PS2Devices.MoveMouse(0, -10, 0);
-                WebSerialLogger.println("s");
-                break;
-            case 'a':  
-                PS2Devices.MoveMouse(-10, 0, 0);
-                WebSerialLogger.println("a");
-                break;
-            case 'd':  
-                PS2Devices.MoveMouse(10, 0, 0);
-                WebSerialLogger.println("d");
-                break;
-            case '1':
-                PS2Devices.PressMouse(esp32_ps2dev::PS2Mouse::Button::LEFT);
-                WebSerialLogger.println("1");
-                break;
-            case '2':
-                PS2Devices.PressMouse(esp32_ps2dev::PS2Mouse::Button::MIDDLE);
-                WebSerialLogger.println("2");
-                break;
-            case '3':
-                PS2Devices.PressMouse(esp32_ps2dev::PS2Mouse::Button::RIGHT);
-                WebSerialLogger.println("3");
-                break;
-            case '4':
-                PS2Devices.Type(esp32_ps2dev::scancodes::Key::K_F12);
-                WebSerialLogger.println("F12");
-                break;
-            default:
-                
-                
-                String str = String(ch);
-                WebSerialLogger.println(str.c_str());
-                PS2Devices.Type(str.c_str());
-                break;
-        }
+    }
+    else
+    {
+        ch = WebSerialLogger.GetInput();
     }
 
-    
+    switch(ch)
+    {
+        case (char)-1:
+            break;
+        case 'i':
+            MyEspUsbHost.DisplayInfo();
+            break;
+        case 'w':
+            PS2Devices.MoveMouse(0, 10, 0);
+            WebSerialLogger.println("w");
+            break;
+        case 's':
+            PS2Devices.MoveMouse(0, -10, 0);
+            WebSerialLogger.println("s");
+            break;
+        case 'a':  
+            PS2Devices.MoveMouse(-10, 0, 0);
+            WebSerialLogger.println("a");
+            break;
+        case 'd':  
+            PS2Devices.MoveMouse(10, 0, 0);
+            WebSerialLogger.println("d");
+            break;
+    }
+
     WebSerialLogger.Loop();
 }

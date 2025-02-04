@@ -13,7 +13,7 @@ void recvMsg(const uint8_t *data, size_t len)
     inputString = inputString + d;
 
     Serial.println(d);
-    PS2Devices.Type(d.c_str());  
+    
 }
 
 void WebSerialLoggerClass::Start()
@@ -29,23 +29,25 @@ void WebSerialLoggerClass::Begin(AsyncWebServer *_server)
     webSerial.begin(_server);
     webSerial.onMessage(recvMsg);
 
+    webSerial.println("Hello from ESP32!");
+    
     running = true;
-}
-
-char WebSerialLoggerClass::GetInput()
-{
-    if(inputString == "")
-        return ' ';
-
-    char c = inputString[0];
-    inputString = inputString.substring(1);
-    return c;
 }
 
 bool WebSerialLoggerClass::IsRunning()
 {
     return running;
     
+}
+
+char WebSerialLoggerClass::GetInput()
+{
+    if(inputString == "")
+        return -1;
+
+    char c = inputString[0];
+    inputString = inputString.substring(1);
+    return c;
 }
 
 void WebSerialLoggerClass::printf(const char *text, ...)

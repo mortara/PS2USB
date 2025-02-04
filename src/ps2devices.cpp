@@ -23,14 +23,24 @@ void PS2DevicesClass::Type(const char *text)
     _keyboard->type(text);
 }
 
-void PS2DevicesClass::MoveMouse(int x, int y, int wheel)
+void PS2DevicesClass::Type(char ch)
+{
+    _keyboard->type(String(ch).c_str());
+}
+
+void PS2DevicesClass::MoveMouse(int16_t x, int16_t y, int8_t wheel)
 {
     _mouse->move(x, y, wheel);
 }
 
-void PS2DevicesClass::PressMouse(esp32_ps2dev::PS2Mouse::Button button)
+void PS2DevicesClass::PressMouseButton(esp32_ps2dev::PS2Mouse::Button button)
 {
     _mouse->press(button);
+}
+
+void PS2DevicesClass::ReleaseMouseButton(esp32_ps2dev::PS2Mouse::Button button)
+{
+    _mouse->release(button);
 }
 
 PS2DevicesClass PS2Devices;
