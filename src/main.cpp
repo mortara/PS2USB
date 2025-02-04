@@ -1,46 +1,15 @@
 #include "main.h"
 
-#include "EspUsbHost.h"
-#include "ArduinoOTA.h"
-
-// Lindy Kabel
-// 1: Data -> gelb
-// 2: Unused ->Orange
-// 3: GND -> grün
-// 4: VCC -> rot
-// 5: Clock -> schwarz
-// 6: Unused ->braun
-
+bool ota_only_mode = false;
 bool ota_running = false;
 unsigned long ota_timer = 0;
 
-class MyEspUsbHost : public EspUsbHost {
-  void onKeyboardKey(uint8_t ascii, uint8_t keycode, uint8_t modifier) {
-    if (' ' <= ascii && ascii <= '~') {
-      WebSerialLogger.printf("%c", ascii);
-    } else if (ascii == '\r') {
-      WebSerialLogger.println();
-    }
-  };
-
-  void onMouseMoved(int16_t x, int16_t y, int8_t wheel) {
-    WebSerialLogger.printf("Mouse moved: x=%d, y=%d, wheel=%d\n", x, y, wheel);
-  };
-
-  void onConfigured() {
-    WebSerialLogger.println("USB device configured");
-  };
-
-  void onConnect() {
-      WebSerialLogger.println("USB device connected");
-  };
-};
-
-MyEspUsbHost usbHost;
+const int SWITCH_PINS[] = { 26, 27, 14, 12 };
 
 void start_ota()
 {
-    ArduinoOTA.onStart([]() {
+    ArduinoOTA.onStart([]() 
+    {
 
       String type;
       if (ArduinoOTA.getCommand() == U_FLASH) {
@@ -51,13 +20,15 @@ void start_ota()
 
       // NOTE: if updating FS this would be the place to unmount FS using FS.end()
       WebSerialLogger.println("Start updating " + type);
+      ota_only_mode = true;
     });
 
     ArduinoOTA.onEnd([]() {
       WebSerialLogger.println("\nEnd");
     });
 
-    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) 
+    {
       
       Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
     });
@@ -88,29 +59,42 @@ void setup() {
     Serial.begin(115200);
     Serial.println("Hello, world!");
 
-    Serial.println("Initializing keyboard...");
-    PS2Devices.InitKeyboard(5,4); 
+    pinMode(SWITCH_PINS[0], INPUT_PULLUP);
 
-    // initialize mouse
-    Serial.println("Initializing mouse...");  
-    PS2Devices.InitMouse(17,16);
+    int state = digitalRead(SWITCH_PINS[0]);
 
-    Serial.println("Initializing USB Host...");
-    usbHost.begin();
-    usbHost.setHIDLocal(HID_LOCAL_German);
+    if (state == ON)
+    {
+        ota_only_mode = true;
+        WIFIManager.Connect();
+    }
+    else
+    {
+      Serial.println("Initializing keyboard...");
+      PS2Devices.InitKeyboard(KEYBOARD_CLK,KEYBOARD_DATA); 
 
-    Serial.println("Starting wifi connection...");
-    WIFIManager.Connect();
+      // initialize mouse
+      Serial.println("Initializing mouse...");  
+      PS2Devices.InitMouse(MOUSE_CLK,MOUSE_DATA);
 
-    Serial.println("Starting webserver...");
-    WebServer.Setup();
+      Serial.println("Initializing USB Host...");
+      MyEspUsbHost.begin();
+      
 
+      Serial.println("Starting wifi connection...");
+      WIFIManager.Connect();
+
+      Serial.println("Starting webserver...");
+      WebServer.Setup();
+    }
 
 }
 
 void loop() {
   
   unsigned long now = millis();
+    WIFIManager.Loop();
+
    if(now - ota_timer > 100UL)
     {
      
@@ -124,10 +108,15 @@ void loop() {
       ota_timer = now;
     }
 
+    if(ota_only_mode)
+    {
+        return;
+    }
+
     if(WiFi.isConnected() && !WebSerialLogger.IsRunning())
           WebSerialLogger.Begin(WebServer.GetServer());
 
-    usbHost.task(); 
+    MyEspUsbHost.task(); 
 
     char ch = -1;
     if (Serial.available()>0)
@@ -178,6 +167,6 @@ void loop() {
         }
     }
 
-    WIFIManager.Loop();
+    
     WebSerialLogger.Loop();
 }

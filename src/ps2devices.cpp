@@ -2,13 +2,15 @@
 
 void PS2DevicesClass::InitKeyboard(int clock, int data)
 {
-    PS2Devices._keyboard = new esp32_ps2dev::PS2Keyboard(clock, data);
+    _keyboard = new esp32_ps2dev::PS2Keyboard(clock, data);
+    _keyboard->begin();
 }
 
 
 void PS2DevicesClass::InitMouse(int clock, int data)
 {
-    PS2Devices._mouse = new esp32_ps2dev::PS2Mouse(clock, data);
+    _mouse = new esp32_ps2dev::PS2Mouse(clock, data);
+    _mouse->begin();
 }
 
 void PS2DevicesClass::Type(esp32_ps2dev::scancodes::Key key)
