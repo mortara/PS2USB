@@ -1,0 +1,8 @@
+{
+    "idf.portWin": "COM9",
+    "files.associations": {
+        "hid_usage_keyboard.h": "c",
+        "hid_usage_mouse.h": "c",
+        "string": "cpp"
+    }
+}
