@@ -1,5 +1,6 @@
 #include <Arduino.h>
-#include <esp32-ps2dev.h>
+#include <PS2Mouse.hpp>
+#include <PS2Keyboard.hpp>
 
 #ifndef PS2DEVICES_H
 #define PS2DEVICES_H

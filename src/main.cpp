@@ -93,12 +93,12 @@ void setup() {
 
 void loop() {
   
-  if(!setup_done)
-  {
-    return;
-  }
+    if(!setup_done)
+    {
+      return;
+    }
 
-  unsigned long now = millis();
+    unsigned long now = millis();
     WIFIManager.Loop();
 
     if(now - ota_timer > 100UL)
@@ -162,5 +162,4 @@ void loop() {
             break;
     }
 
-    WebSerialLogger.Loop();
 }
