@@ -15,8 +15,7 @@ class WebSerialLoggerClass
 {
     private:
         WebSerial webSerial;
-        AsyncWebServer *_server;
-      
+        
         bool running = false;
 
     public:
@@ -27,9 +26,8 @@ class WebSerialLoggerClass
         void print(const char *text);
         void print(String text = "");
         void println(const char *text);
-        void println(String text = "");
+        void println(String text = "");       
         void Flush();
-        void Loop();
         char GetInput();
 };
 

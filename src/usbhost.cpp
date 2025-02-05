@@ -52,20 +52,12 @@ void MyEspUsbHostClass::onKeyboardKey(uint8_t ascii, uint8_t keycode, uint8_t mo
     }
   };
 
-void MyEspUsbHostClass::onMouse(hid_mouse_report_t report, uint8_t last_buttons) {
-
-    String str = "OnMouse: " + String(report.x) + " " + String(report.y) + " " + String(report.wheel) + " " + String(last_buttons);
-
-    Serial.println(str);
-    PS2Devices.MoveMouse(report.x, -report.y, report.wheel);
-};
-
 void MyEspUsbHostClass::onMouseMove(hid_mouse_report_t report) {
 
-    //String str = "onMouseMove: " + String(report.x) + " " + String(report.y) + " " + String(report.wheel);
+    String str = "onMouseMove: " + String(report.x) + " " + String(report.y) + " " + String(report.wheel);
 
-    //Serial.println(str);
-    //PS2Devices.MoveMouse((int16_t)report.x, (int16_t)report.y, report.wheel);
+    Serial.println(str);
+    PS2Devices.MoveMouse((int16_t)report.x, (int16_t)-report.y, report.wheel);
 };
 
 void MyEspUsbHostClass::onMouseButtons(hid_mouse_report_t report, uint8_t last_buttons)
@@ -102,13 +94,18 @@ void MyEspUsbHostClass::onMouseButtons(hid_mouse_report_t report, uint8_t last_b
 
 }
 
-void MyEspUsbHostClass::onConfigured() {
-    WebSerialLogger.println("USB device configured");
-};
+void MyEspUsbHostClass::onData(const usb_transfer_t *transfer)
+{
+    Serial.printf("USB Data received: %d\n bytes", transfer->data_buffer_size);
 
-void MyEspUsbHostClass::onConnect() {
-      WebSerialLogger.println("USB device connected");
-};
+    //WebSerialLogger.println("onData");
+}
+
+void MyEspUsbHostClass::onGone(const usb_host_client_event_msg_t *eventMsg)
+{
+
+    Serial.println("onGone");
+}
 
 void MyEspUsbHostClass::init()
 {
@@ -120,9 +117,10 @@ void MyEspUsbHostClass::DisplayInfo()
 {
     WebSerialLogger.print("[*] USB information:");
     
-    for(int i = 0; i < 17; i++)
+    for(int i = 0; i < 5; i++)
     {
       endpoint_data_t ep = this->endpoint_data_list[i];
+
       String str = String(ep.bInterfaceNumber) + " " + String(ep.bInterfaceClass) + " " + String(ep.bInterfaceProtocol) + " " + String(ep.bCountryCode);
       WebSerialLogger.println(str);
     }

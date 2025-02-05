@@ -91,11 +91,6 @@ void WebSerialLoggerClass::println(String text)
 
 }
 
-void WebSerialLoggerClass::Loop()
-{
-    
-}
-
 void WebSerialLoggerClass::Flush()
 {
     if(running)

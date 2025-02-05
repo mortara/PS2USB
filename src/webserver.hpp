@@ -11,7 +11,7 @@
 class WebServerClass
 {
     private:
-        AsyncWebServer *_webserver;
+        AsyncWebServer *_webserver = NULL;
         DNSServer dnsServer;
      
     public:
