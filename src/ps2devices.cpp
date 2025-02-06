@@ -13,6 +13,16 @@ void PS2DevicesClass::InitMouse(int clock, int data)
     _mouse->begin();
 }
 
+void PS2DevicesClass::KeyDown(esp32_ps2dev::scancodes::Key key)
+{
+    _keyboard->keydown(key);
+}
+
+void PS2DevicesClass::KeyUp(esp32_ps2dev::scancodes::Key key)
+{
+    _keyboard->keyup(key);
+}
+
 void PS2DevicesClass::Type(esp32_ps2dev::scancodes::Key key)
 {
     _keyboard->type(key);

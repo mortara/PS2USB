@@ -15,6 +15,9 @@ class PS2DevicesClass
         void InitKeyboard(int clock, int data);
         void InitMouse(int clock, int data);
 
+        void KeyUp(esp32_ps2dev::scancodes::Key key);
+        void KeyDown(esp32_ps2dev::scancodes::Key key);
+
         void Type(esp32_ps2dev::scancodes::Key key);
         void Type(const char *text);
         void Type(char ch);
