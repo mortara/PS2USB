@@ -3,7 +3,8 @@
 #include "webserver.hpp"
 #include "ps2devices.h"
 #include "usbhost.h"
-#include "ArduinoOTA.h"
+
+#include "ota_handler.h"
 
 // Lindy Kabel
 // 1: Data -> gelb
@@ -22,3 +23,16 @@
 
 #define ON LOW
 #define OFF HIGH
+
+bool setup_done = false;
+
+const int SWITCH_PINS[] = { 38, 27, 14, 12 };
+
+ota_handler OTAHandler;
+TaskHandle_t Task1;
+TaskHandle_t Task2;
+
+void DisplayLoopTime();
+void Task1code( void * parameter);
+void Task2code( void * parameter);
+void secondary_loop();

@@ -139,7 +139,18 @@ esp32_ps2dev::scancodes::Key MyEspUsbHostClass::USBKeyCodeToPS2ScanCode(uint8_t 
       case 48:
         return esp32_ps2dev::scancodes::Key::K_RIGHTBRACKET;
         break;                      
-
+      case 49:
+        return esp32_ps2dev::scancodes::Key::K_BACKSLASH;
+        break;                       
+      case 51:
+        return esp32_ps2dev::scancodes::Key::K_SEMICOLON;
+        break;
+      case 54:
+        return esp32_ps2dev::scancodes::Key::K_COMMA;
+        break;
+      case 55:
+        return esp32_ps2dev::scancodes::Key::K_PERIOD;
+        break;
       case 58:
         return esp32_ps2dev::scancodes::Key::K_F1;
         break;
@@ -178,15 +189,15 @@ esp32_ps2dev::scancodes::Key MyEspUsbHostClass::USBKeyCodeToPS2ScanCode(uint8_t 
         break;
       
       default:
-        return (esp32_ps2dev::scancodes::Key)keycode;
+        return (esp32_ps2dev::scancodes::Key)(keycode -3);
         break;
     }
 }
 
 void MyEspUsbHostClass::onKeyboard(hid_keyboard_report_t report, hid_keyboard_report_t last_report)
 {
-    //String str = "Keyboard: " +  String(report.keycode[0]) + " " + String(report.modifier);
-    //WebSerialLogger.println(str);
+    String str = "Keyboard: " +  String(report.keycode[0]) + " " +  String(report.keycode[1]) + " "+  String(report.keycode[2]) + " "+  String(report.keycode[3]) + " "+  String(report.keycode[4]) + " "+  String(report.keycode[5]) + " " + String(report.modifier);
+    WebSerialLogger.println(str);
 
     if(report.modifier != last_report.modifier)
     {

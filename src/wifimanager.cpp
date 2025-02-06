@@ -25,6 +25,7 @@ bool WIFIManagerClass::Connect()
     WiFi.begin(_credentials.SSID.c_str(), _credentials.PASS.c_str());
     WebSerialLogger.println("Connecting to WiFi ..");
     _lastConnectionTry = millis();
+    wifi_timer = millis();
     /*int timeout = 10;
     while (WiFi.status() != WL_CONNECTED) {
         Serial.print('.');
@@ -82,22 +83,26 @@ void WIFIManagerClass::Loop()
 {
     unsigned long currentMillis = millis();
 
-    connected = WiFi.isConnected();
-
-    if(connecting && connected)
+    if(currentMillis - wifi_timer > 100UL)
     {
-        WebSerialLogger.println("WiFi connected!");
-        DisplayInfo();
-        connecting = false;
-    }
+        wifi_timer = currentMillis;
+        connected = WiFi.isConnected();
 
-    // if WiFi is down, try reconnecting
-    if (!connecting && !connected && (currentMillis - _lastConnectionTry >= interval)) 
-    {
-        WebSerialLogger.println("Reconnecting to WiFi...");
-        WiFi.reconnect();
-        connecting = true;
-        _lastConnectionTry = currentMillis;
+        if(connecting && connected)
+        {
+            WebSerialLogger.println("WiFi connected!");
+            DisplayInfo();
+            connecting = false;
+        }
+
+        // if WiFi is down, try reconnecting
+        if (!connecting && !connected && (currentMillis - _lastConnectionTry >= interval)) 
+        {
+            WebSerialLogger.println("Reconnecting to WiFi...");
+            WiFi.reconnect();
+            connecting = true;
+            _lastConnectionTry = currentMillis;
+        }
     }
 }
 

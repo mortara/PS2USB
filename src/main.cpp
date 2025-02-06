@@ -1,60 +1,5 @@
 #include "main.h"
 
-bool setup_done = false;
-bool ota_only_mode = false;
-bool ota_running = false;
-unsigned long ota_timer = 0;
-
-const int SWITCH_PINS[] = { 38, 27, 14, 12 };
-
-void start_ota()
-{
-    ArduinoOTA.onStart([]() 
-    {
-
-      String type;
-      if (ArduinoOTA.getCommand() == U_FLASH) {
-        type = "sketch";
-      } else {  // U_FS
-        type = "filesystem";
-      }
-
-      // NOTE: if updating FS this would be the place to unmount FS using FS.end()
-      WebSerialLogger.println("Start updating " + type);
-      ota_only_mode = true;
-    });
-
-    ArduinoOTA.onEnd([]() {
-      WebSerialLogger.println("\nEnd");
-    });
-
-    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) 
-    {
-      
-      Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-    });
-
-    ArduinoOTA.onError([](ota_error_t error) {
-      Serial.printf("Error[%u]: ", error);
-      if (error == OTA_AUTH_ERROR) {
-        Serial.println("Auth Failed");
-      } else if (error == OTA_BEGIN_ERROR) {
-        Serial.println("Begin Failed");
-      } else if (error == OTA_CONNECT_ERROR) {
-        Serial.println("Connect Failed");
-      } else if (error == OTA_RECEIVE_ERROR) {
-        Serial.println("Receive Failed");
-      } else if (error == OTA_END_ERROR) {
-        Serial.println("End Failed");
-      }
-    });
-    
-    ArduinoOTA.begin();
-    Serial.println("OTA started");
-    ota_running = true;
-    ota_timer = millis();
-}
-
 void setup() {
 
     Serial.begin(115200);
@@ -63,41 +8,84 @@ void setup() {
     pinMode(SWITCH_PINS[0], INPUT_PULLUP);
 
     int state = digitalRead(SWITCH_PINS[0]);
-
+    Serial.println(state);
     if (state == ON)
     {
-        ota_only_mode = true;
+        Serial.println("Entering OTA only mode!");
+        OTAHandler.OTAOnly = true;
+
+        Serial.println("Starting wifi connection...");
         WIFIManager.Connect();
+        return;
     }
-    else
-    {
-      Serial.println("Initializing keyboard...");
-      PS2Devices.InitKeyboard(KEYBOARD_CLK,KEYBOARD_DATA); 
 
-      // initialize mouse
-      Serial.println("Initializing mouse...");  
-      PS2Devices.InitMouse(MOUSE_CLK,MOUSE_DATA);
+    xTaskCreatePinnedToCore(
+        Task1code, /* Function to implement the task */
+        "Task1", /* Name of the task */
+        10000,  /* Stack size in words */
+        NULL,  /* Task input parameter */
+        0,  /* Priority of the task */
+        &Task1,  /* Task handle. */
+        0); /* Core where the task should run */
 
-      Serial.println("Initializing USB Host...");
-      MyEspUsbHost.init();
+    xTaskCreatePinnedToCore(
+        Task2code, /* Function to implement the task */
+        "Task2", /* Name of the task */
+        10000,  /* Stack size in words */
+        NULL,  /* Task input parameter */
+        5,  /* Priority of the task */
+        &Task2,  /* Task handle. */
+        1); /* Core where the task should run */
+
+}
+
+/// @brief This tasks executes the secondary features of the adapter: OTA, WebServer and WebSerial
+/// @param parameter 
+void Task1code( void * parameter) {
+
+    Serial.println("Starting wifi connection...");
+    WIFIManager.Connect();
+
+    Serial.println("Starting webserver...");
+    WebServer.Setup();
+
+    for(;;) {
+      delay(50);
+      secondary_loop();
+    }
+}
+
+/// @brief This is the main task of the adapter. It handles USB input and PS/2 output
+/// @param parameter 
+void Task2code( void * parameter) {
+
+    Serial.println("Initializing keyboard...");
+    PS2Devices.InitKeyboard(KEYBOARD_CLK,KEYBOARD_DATA); 
+
+    // initialize mouse
+    Serial.println("Initializing mouse...");  
+    PS2Devices.InitMouse(MOUSE_CLK,MOUSE_DATA);
+
+    Serial.println("Initializing USB Host...");
+    MyEspUsbHost.init();
+
+    for(;;) {
+      //delay(5);
+     
+      //DisplayLoopTime();
       
-      Serial.println("Starting wifi connection...");
-      WIFIManager.Connect();
-
-      Serial.println("Starting webserver...");
-      WebServer.Setup();
+      MyEspUsbHost.task(); 
+      delay(5);
     }
-
-    setup_done = true;
 }
 
 unsigned long _lastLoop = millis();
 
 unsigned long _loopTimeMax = 0;
-unsigned long _loopTimeMin = 9999;
+unsigned long _loopTimeMin = 9999999;
 unsigned long _loopTimeSum = 0;
 int _loopTimeCount = 0;
-
+int _loopsToCount = 1000;
 
 void DisplayLoopTime()
 {
@@ -114,90 +102,80 @@ void DisplayLoopTime()
     _loopTimeSum += looptime;
     _loopTimeCount++;
 
-    if(_loopTimeCount == 100)
+    if(_loopTimeCount == _loopsToCount)
     {
       float looptimeaverage = (float)_loopTimeSum / (float)_loopTimeCount;
-      Serial.printf("Looptime: Avg: %d   Min: %d  Max: %d", looptimeaverage, _loopTimeMin, _loopTimeMax);
+      Serial.printf("Looptime: Avg: %f   Min: %u  Max: %u \r\n", looptimeaverage, _loopTimeMin, _loopTimeMax);
 
       _loopTimeCount = 0;
       _loopTimeSum = 0;
       _loopTimeMax = 0;
-      _loopTimeMin = 9999;
+      _loopTimeMin = 9999999;
     }
 
 }
 
-void loop() {
-  
-    if(!setup_done)
-    {
-      return;
-    }
-
-    DisplayLoopTime();
-
-    unsigned long now = millis();
+void secondary_loop()
+{
     WIFIManager.Loop();
-
-    if(now - ota_timer > 100UL)
-    {
-     
-      if(ota_running)
-        ArduinoOTA.handle();
-      else
-      {
-        if(WiFi.isConnected())
-          start_ota();
-      }
-      ota_timer = now;
-    }
-
-    if(ota_only_mode)
+    OTAHandler.Loop();
+    
+    if(OTAHandler.OTAOnly)
     {
         return;
     }
 
     if(WiFi.isConnected() && !WebSerialLogger.IsRunning())
     {
-          WebSerialLogger.Begin(WebServer.GetServer());
+        WebSerialLogger.Begin(WebServer.GetServer());
     }
-    
-    MyEspUsbHost.task(); 
+}
 
-    char ch = -1;
+void DebugKeys()
+{
+  char ch = -1;
   
-    if (Serial.available()>0)
-    {
-        ch = Serial.read();
-    }
-    else
-    {
-        ch = WebSerialLogger.GetInput();
-    }
+  if (Serial.available()>0)
+  {
+      ch = Serial.read();
+  }
+  else
+  {
+      ch = WebSerialLogger.GetInput();
+  }
 
-    switch(ch)
-    {
-        case (char)-1:
-            break;
-        case 'i':
-            MyEspUsbHost.DisplayInfo();
-            break;
-        case 'w':
-            PS2Devices.MoveMouse(0, 10, 0);
-            WebSerialLogger.println("w");
-            break;
-        case 's':
-            PS2Devices.MoveMouse(0, -10, 0);
-            WebSerialLogger.println("s");
-            break;
-        case 'a':  
-            PS2Devices.MoveMouse(-10, 0, 0);
-            WebSerialLogger.println("a");
-            break;
-        case 'd':  
-            PS2Devices.MoveMouse(10, 0, 0);
-            WebSerialLogger.println("d");
-            break;
-    }
+  switch(ch)
+  {
+      case (char)-1:
+          break;
+      case 'i':
+          MyEspUsbHost.DisplayInfo();
+          break;
+      case 'w':
+          PS2Devices.MoveMouse(0, 10, 0);
+          WebSerialLogger.println("w");
+          break;
+      case 's':
+          PS2Devices.MoveMouse(0, -10, 0);
+          WebSerialLogger.println("s");
+          break;
+      case 'a':  
+          PS2Devices.MoveMouse(-10, 0, 0);
+          WebSerialLogger.println("a");
+          break;
+      case 'd':  
+          PS2Devices.MoveMouse(10, 0, 0);
+          WebSerialLogger.println("d");
+          break;
+  }
+}
 
+void loop() 
+{
+    if(OTAHandler.OTAOnly)
+    {
+        //Serial.println("OTA only mode!");
+        secondary_loop();
+        return;
+    }
 }
