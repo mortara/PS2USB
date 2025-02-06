@@ -91,12 +91,50 @@ void setup() {
     setup_done = true;
 }
 
+unsigned long _lastLoop = millis();
+
+unsigned long _loopTimeMax = 0;
+unsigned long _loopTimeMin = 9999;
+unsigned long _loopTimeSum = 0;
+int _loopTimeCount = 0;
+
+
+void DisplayLoopTime()
+{
+    unsigned long now = millis();
+    unsigned long looptime = now - _lastLoop;
+    _lastLoop = now;
+
+    if(looptime > _loopTimeMax)
+      _loopTimeMax = looptime;
+
+    if(looptime < _loopTimeMin)
+      _loopTimeMin = looptime;
+
+    _loopTimeSum += looptime;
+    _loopTimeCount++;
+
+    if(_loopTimeCount == 100)
+    {
+      float looptimeaverage = (float)_loopTimeSum / (float)_loopTimeCount;
+      Serial.printf("Looptime: Avg: %d   Min: %d  Max: %d", looptimeaverage, _loopTimeMin, _loopTimeMax);
+
+      _loopTimeCount = 0;
+      _loopTimeSum = 0;
+      _loopTimeMax = 0;
+      _loopTimeMin = 9999;
+    }
+
+}
+
 void loop() {
   
     if(!setup_done)
     {
       return;
     }
+
+    DisplayLoopTime();
 
     unsigned long now = millis();
     WIFIManager.Loop();
