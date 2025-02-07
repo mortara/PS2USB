@@ -42,6 +42,9 @@ D-           |   20
 GND          |   GND
 VBus         |   PS/2 Keyboard 5v
 
+I have routed the +5v lines of the PS/2 cables through a dip switch block so i can decide if the ESP or the USB device
+will be powered by the PS/2 cables or not.
+
 ### Configuration
 
 I've also attached 4 Pins of the ESP to a DIP Switch block in order to have config options:
