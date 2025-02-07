@@ -6,10 +6,18 @@ void setup() {
     Serial.println("Hello, world!");
 
     pinMode(SWITCH_PINS[0], INPUT_PULLUP);
+    pinMode(SWITCH_PINS[1], INPUT_PULLUP);
+    pinMode(SWITCH_PINS[2], INPUT_PULLUP);
+    pinMode(SWITCH_PINS[3], INPUT_PULLUP);
 
-    int state = digitalRead(SWITCH_PINS[0]);
-    Serial.println(state);
-    if (state == ON)
+    int state0 = digitalRead(SWITCH_PINS[0]);
+    int state1 = digitalRead(SWITCH_PINS[1]);
+    int state2 = digitalRead(SWITCH_PINS[2]);
+    int state3 = digitalRead(SWITCH_PINS[3]);
+
+    Serial.printf("DIP switches: %d %d %d %d \r\n", state0, state1, state2, state3);
+   
+    if (state0 == ON)
     {
         Serial.println("Entering OTA only mode!");
         OTAHandler.OTAOnly = true;
@@ -19,7 +27,22 @@ void setup() {
         return;
     }
 
-    xTaskCreatePinnedToCore(
+    if(state1 == ON)
+    {
+        Serial.println("Swapping PS2 cables");
+        PS2Devices.CablesSwapped = true;
+    }
+
+    if(state2 == ON)
+    {
+        Serial.println("Disabling secondary features!");
+        disable_secondary_features = true;
+    }
+
+    if(!disable_secondary_features)
+    {
+        Serial.println("Starting secondary features task...");
+        xTaskCreatePinnedToCore(
         Task1code, /* Function to implement the task */
         "Task1", /* Name of the task */
         10000,  /* Stack size in words */
@@ -27,6 +50,7 @@ void setup() {
         0,  /* Priority of the task */
         &Task1,  /* Task handle. */
         0); /* Core where the task should run */
+    }
 
     xTaskCreatePinnedToCore(
         Task2code, /* Function to implement the task */
@@ -36,6 +60,7 @@ void setup() {
         5,  /* Priority of the task */
         &Task2,  /* Task handle. */
         1); /* Core where the task should run */
+
 
 }
 
@@ -59,12 +84,26 @@ void Task1code( void * parameter) {
 /// @param parameter 
 void Task2code( void * parameter) {
 
+    int mouse_clock = MOUSE_CLK;
+    int mouse_data = MOUSE_DATA;
+    int keyboard_clock = KEYBOARD_CLK;
+    int keyboard_data = KEYBOARD_DATA;
+
+    if(PS2Devices.CablesSwapped)
+    {
+        Serial.println("Swapping PS/2 cable pins");
+        mouse_clock = KEYBOARD_CLK;
+        mouse_data = KEYBOARD_DATA;
+        keyboard_clock = MOUSE_CLK;
+        keyboard_data = MOUSE_DATA;
+    }
+
     Serial.println("Initializing keyboard...");
-    PS2Devices.InitKeyboard(KEYBOARD_CLK,KEYBOARD_DATA); 
+    PS2Devices.InitKeyboard(keyboard_clock,keyboard_data); 
 
     // initialize mouse
     Serial.println("Initializing mouse...");  
-    PS2Devices.InitMouse(MOUSE_CLK,MOUSE_DATA);
+    PS2Devices.InitMouse(mouse_clock,mouse_data);
 
     Serial.println("Initializing USB Host...");
     MyEspUsbHost.init();

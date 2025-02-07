@@ -12,6 +12,8 @@ class PS2DevicesClass
         esp32_ps2dev::PS2Keyboard *_keyboard;
        
     public:
+        bool CablesSwapped = false;
+
         void InitKeyboard(int clock, int data);
         void InitMouse(int clock, int data);
 

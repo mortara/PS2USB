@@ -19,14 +19,13 @@
 #define KEYBOARD_CLK 5
 #define KEYBOARD_DATA 4
 
-
-
 #define ON LOW
 #define OFF HIGH
 
 bool setup_done = false;
+bool disable_secondary_features = false;
 
-const int SWITCH_PINS[] = { 38, 27, 14, 12 };
+const int SWITCH_PINS[] = { 38, 39, 40, 41 };
 
 ota_handler OTAHandler;
 TaskHandle_t Task1;
