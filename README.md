@@ -51,11 +51,16 @@ I've also attached 4 Pins of the ESP to a DIP Switch block in order to have conf
 
 ESP32 PIN    |   Option
 -------------|----------------
-39           |  Puts the device in OTA only mode
-40           |  Swaps the PS/2 cables pins
-41           |  Deactivates wifi, webserver, ota, webserial
-42           |  currently unused
+38           |  Puts the device in OTA only mode
+39           |  Swaps the PS/2 cables pins
+40           |  Deactivates wifi, webserver, ota, webserial
+41           |  currently unused
 
 The Pins are set to HIGH with internal pullups and the dip switch connects them to GND when set to ON
 
+## Problems
 
+Currently, my main problem is the USB Host implementation on the ESP32:
+ - It seems to have problems with USB hubs
+ - Mice with high dpi (16bit coordinate values)
+   
