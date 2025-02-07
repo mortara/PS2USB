@@ -39,19 +39,6 @@ void setup() {
         disable_secondary_features = true;
     }
 
-    if(!disable_secondary_features)
-    {
-        Serial.println("Starting secondary features task...");
-        xTaskCreatePinnedToCore(
-        Task1code, /* Function to implement the task */
-        "Task1", /* Name of the task */
-        10000,  /* Stack size in words */
-        NULL,  /* Task input parameter */
-        0,  /* Priority of the task */
-        &Task1,  /* Task handle. */
-        0); /* Core where the task should run */
-    }
-
     xTaskCreatePinnedToCore(
         Task2code, /* Function to implement the task */
         "Task2", /* Name of the task */
@@ -61,7 +48,19 @@ void setup() {
         &Task2,  /* Task handle. */
         1); /* Core where the task should run */
 
-
+    if(disable_secondary_features)
+        return;
+    
+    Serial.println("Starting secondary features task...");
+    xTaskCreatePinnedToCore(
+    Task1code, /* Function to implement the task */
+    "Task1", /* Name of the task */
+    10000,  /* Stack size in words */
+    NULL,  /* Task input parameter */
+    0,  /* Priority of the task */
+    &Task1,  /* Task handle. */
+    0); /* Core where the task should run */
+    
 }
 
 /// @brief This tasks executes the secondary features of the adapter: OTA, WebServer and WebSerial
