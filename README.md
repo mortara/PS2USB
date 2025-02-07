@@ -20,7 +20,7 @@ I am using a ESP32-S3-WROOM-1.
 ### The PS/2 cables are wired like this:
 
 PS/2          |   ESP32-S3 PIN
--------------------------------
+--------------|----------------
 Mouse CLK     |   17
 Mouse DATA    |   16
 Mouse GND     |   GND
@@ -33,7 +33,7 @@ Keyboard +5v  |   VBUS of USB socket
 ### There is a USB Type-A socket connected like this:
 
 USB          |   ESP32-S3 PIN
--------------------------------
+-------------|-----------------
 D+           |   21
 D-           |   20
 GND          |   GND
@@ -42,7 +42,7 @@ VBus         |   PS/2 Keyboard 5v
 ### I've also attached 4 Pins of the ESP to a DIP Switch block in order to have config options:
 
 ESP32 PIN    |   Option
-------------------------------
+-------------|----------------
 39           |  Puts the device in OTA only mode
 40           |  Swaps the PS/2 cables pins
 41           |  Deactivates wifi, webserver, ota, webserial
