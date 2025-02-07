@@ -17,7 +17,9 @@ This project makes ue of the following libs:
 
 I am using a ESP32-S3-WROOM-1. 
 
-### The PS/2 cables are wired like this:
+### PS/2 cables 
+
+The PS/2 cables are wired like this:
 
 PS/2          |   ESP32-S3 PIN
 --------------|----------------
@@ -30,7 +32,8 @@ Keyboard DATA |   4
 Keyboard GND  |   GND
 Keyboard +5v  |   VBUS of USB socket
 
-### There is a USB Type-A socket connected like this:
+### USB Socket
+There is a USB Type-A socket connected like this:
 
 USB          |   ESP32-S3 PIN
 -------------|-----------------
@@ -39,13 +42,16 @@ D-           |   20
 GND          |   GND
 VBus         |   PS/2 Keyboard 5v
 
-### I've also attached 4 Pins of the ESP to a DIP Switch block in order to have config options:
+### Configuration
+
+I've also attached 4 Pins of the ESP to a DIP Switch block in order to have config options:
 
 ESP32 PIN    |   Option
 -------------|----------------
 39           |  Puts the device in OTA only mode
 40           |  Swaps the PS/2 cables pins
 41           |  Deactivates wifi, webserver, ota, webserial
+42           |  currently unused
 
 The Pins are set to HIGH with internal pullups and the dip switch connects them to GND when set to ON
 
