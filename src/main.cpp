@@ -5,6 +5,8 @@ void setup() {
     Serial.begin(115200);
     Serial.println("Hello, world!");
 
+    Serial.println(ESP.getSdkVersion());
+
     pinMode(SWITCH_PINS[0], INPUT_PULLUP);
     pinMode(SWITCH_PINS[1], INPUT_PULLUP);
     pinMode(SWITCH_PINS[2], INPUT_PULLUP);
@@ -216,4 +218,6 @@ void loop()
         secondary_loop();
         return;
     }
+
+    DebugKeys();
 }
