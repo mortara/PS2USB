@@ -1,4 +1,4 @@
-#include <Arduino.h>
+
 #include <DNSServer.h>
 #include "WiFi.h"
 #include "AsyncTCP.h"

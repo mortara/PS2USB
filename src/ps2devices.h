@@ -1,4 +1,4 @@
-#include <Arduino.h>
+
 #include <PS2Mouse.hpp>
 #include <PS2Keyboard.hpp>
 

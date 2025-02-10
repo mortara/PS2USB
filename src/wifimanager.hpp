@@ -1,4 +1,4 @@
-#include <Arduino.h>
+
 #include <WiFi.h>
 #include "secrets.h"
 #include "webserial.hpp"

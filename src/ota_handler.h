@@ -1,4 +1,4 @@
-#include <Arduino.h>
+
 #include "ArduinoOTA.h"
 #include "webserial.hpp"
 
