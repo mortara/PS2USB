@@ -7,11 +7,16 @@ This is currently very much WIP and a lot of things don't work as expected.
 ## Libraries
 
 This project makes ue of the following libs:
- - https://github.com/hrko/esp32-ps2dev
+ - https://github.com/hrko/esp32-ps2dev (I forked it to try some stuff)
  - https://github.com/mallardtheduck/EspUsbHost  (I forked it to try some stuff)
  - https://github.com/mathieucarbou/MycilaWebSerial
  - https://github.com/mathieucarbou/AsyncTCP
  - https://github.com/mathieucarbou/ESPAsyncWebServer
+
+## Development
+
+I was using PlatformIO initially but since i need more recent USB features of esp-idf, i switched to pioarduino:
+https://github.com/pioarduino
 
 ## Hardware
 
@@ -60,7 +65,7 @@ The Pins are set to HIGH with internal pullups and the dip switch connects them 
 
 ## Problems
 
-Currently, my main problem is the USB Host implementation on the ESP32:
+Currently my main problem is the USB Host implementation on the ESP32:
  - It seems to have problems with USB hubs
  - Mice with high dpi (16bit coordinate values)
    
