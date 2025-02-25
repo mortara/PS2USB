@@ -6,3 +6,5 @@
 src/secrets.h
 .vscode/extensions.json
 .vscode/settings.json
+/wiring/wiring-backups
+wiring/fp-info-cache
