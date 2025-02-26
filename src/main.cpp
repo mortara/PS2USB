@@ -1,4 +1,5 @@
 #include "main.h"
+#include "webserver.hpp"
 
 void setup() {
 
@@ -73,7 +74,7 @@ void Task1code( void * parameter) {
     WIFIManager.Connect();
 
     Serial.println("Starting webserver...");
-    WebServer.Setup();
+    WebServer.Setup(handleRoot, notFound);
 
     for(;;) {
       delay(50);

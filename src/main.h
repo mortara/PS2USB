@@ -1,10 +1,10 @@
 
-#include "wifimanager.hpp"
-#include "webserver.hpp"
+#include "Wifi/wifimanager.hpp"
+#include "Webserver/webserver.hpp"
 #include "ps2devices.h"
 #include "usbhost.h"
 
-#include "ota_handler.h"
+#include "OTA/ota_handler.h"
 
 // Lindy Kabel
 // 1: Data -> gelb
