@@ -4,6 +4,7 @@
         "hid_usage_keyboard.h": "c",
         "hid_usage_mouse.h": "c",
         "string": "cpp",
-        "functional": "cpp"
+        "functional": "cpp",
+        "ostream": "cpp"
     }
 }

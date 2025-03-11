@@ -1,11 +1,6 @@
 #include "Webserver/webserver.hpp"
 
 
-
-void notFound(AsyncWebServerRequest *request) {
-    request->send(404, "text/plain", "Not found");
-}
-
 void handleRoot(AsyncWebServerRequest *request) {
     
     //Serial.println("Webserver handle request ...");

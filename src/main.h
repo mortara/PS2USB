@@ -1,10 +1,8 @@
-
-#include "Wifi/wifimanager.hpp"
-#include "Webserver/webserver.hpp"
+#include "Arduino.h"
+#include "pmCommonLib.hpp"
 #include "ps2devices.h"
 #include "usbhost.h"
 
-#include "OTA/ota_handler.h"
 
 // Lindy Kabel
 // 1: Data -> gelb
@@ -27,7 +25,6 @@ bool disable_secondary_features = false;
 
 const int SWITCH_PINS[] = { 38, 39, 40, 41 };
 
-ota_handler OTAHandler;
 TaskHandle_t Task1;
 TaskHandle_t Task2;
 

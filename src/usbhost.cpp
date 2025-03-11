@@ -1,4 +1,5 @@
 #include "usbhost.h"    
+#include "pmCommonLib.hpp"
 
 esp32_ps2dev::scancodes::Key MyEspUsbHostClass::USBKeyCodeToPS2ScanCode(uint8_t keycode)
 {
@@ -197,7 +198,7 @@ esp32_ps2dev::scancodes::Key MyEspUsbHostClass::USBKeyCodeToPS2ScanCode(uint8_t 
 void MyEspUsbHostClass::onKeyboard(hid_keyboard_report_t report, hid_keyboard_report_t last_report)
 {
     String str = "Keyboard: " +  String(report.keycode[0]) + " " +  String(report.keycode[1]) + " "+  String(report.keycode[2]) + " "+  String(report.keycode[3]) + " "+  String(report.keycode[4]) + " "+  String(report.keycode[5]) + " " + String(report.modifier);
-    WebSerialLogger.println(str);
+    pmLogging.LogLn(str);
 
     if(report.modifier != last_report.modifier)
     {
@@ -266,7 +267,7 @@ void MyEspUsbHostClass::onMouseMove(hid_mouse_report_t report) {
 
     String str = "onMouseMove: " + String(report.x) + " " + String(report.y) + " " + String(report.wheel);
 
-    Serial.println(str);
+    pmLogging.LogLn(str);
     PS2Devices.MoveMouse((int16_t)report.x, (int16_t)-report.y, report.wheel);
 };
 
@@ -274,31 +275,31 @@ void MyEspUsbHostClass::onMouseButtons(hid_mouse_report_t report, uint8_t last_b
 {
     // LEFT
     if (!(last_buttons & MOUSE_BUTTON_LEFT) && (report.buttons & MOUSE_BUTTON_LEFT)) {
-      Serial.println("Mouse LEFT Click");
+      pmLogging.LogLn("Mouse LEFT Click");
       PS2Devices.PressMouseButton(esp32_ps2dev::PS2Mouse::Button::LEFT);
     }
     if ((last_buttons & MOUSE_BUTTON_LEFT) && !(report.buttons & MOUSE_BUTTON_LEFT)) {
-      Serial.println("Mouse LEFT Release");
+      pmLogging.LogLn("Mouse LEFT Release");
       PS2Devices.ReleaseMouseButton(esp32_ps2dev::PS2Mouse::Button::LEFT);
     }
 
     // RIGHT
     if (!(last_buttons & MOUSE_BUTTON_RIGHT) && (report.buttons & MOUSE_BUTTON_RIGHT)) {
-      Serial.println("Mouse RIGHT Click");
+      pmLogging.LogLn("Mouse RIGHT Click");
       PS2Devices.PressMouseButton(esp32_ps2dev::PS2Mouse::Button::LEFT);
     }
     if ((last_buttons & MOUSE_BUTTON_RIGHT) && !(report.buttons & MOUSE_BUTTON_RIGHT)) {
-      Serial.println("Mouse RIGHT Release");
+      pmLogging.LogLn("Mouse RIGHT Release");
       PS2Devices.ReleaseMouseButton(esp32_ps2dev::PS2Mouse::Button::LEFT);
     }
 
     // MIDDLE
     if (!(last_buttons & MOUSE_BUTTON_MIDDLE) && (report.buttons & MOUSE_BUTTON_MIDDLE)) {
-      Serial.println("Mouse MIDDLE Click");
+      pmLogging.LogLn("Mouse MIDDLE Click");
       PS2Devices.PressMouseButton(esp32_ps2dev::PS2Mouse::Button::LEFT);
     }
     if ((last_buttons & MOUSE_BUTTON_MIDDLE) && !(report.buttons & MOUSE_BUTTON_MIDDLE)) {
-      Serial.println("Mouse MIDDLE Release");
+      pmLogging.LogLn("Mouse MIDDLE Release");
       PS2Devices.ReleaseMouseButton(esp32_ps2dev::PS2Mouse::Button::LEFT);
     }
 
@@ -308,13 +309,13 @@ void MyEspUsbHostClass::onData(const usb_transfer_t *transfer)
 {
     Serial.printf("USB Data received: %d\n bytes", transfer->data_buffer_size);
 
-    //WebSerialLogger.println("onData");
+    //pmLogging.LogLn("onData");
 }
 
 void MyEspUsbHostClass::onGone(const usb_host_client_event_msg_t *eventMsg)
 {
 
-    Serial.println("onGone");
+  pmLogging.LogLn("onGone");
 }
 
 void MyEspUsbHostClass::init()
@@ -325,14 +326,14 @@ void MyEspUsbHostClass::init()
 
 void MyEspUsbHostClass::DisplayInfo()
 {
-    WebSerialLogger.print("[*] USB information:");
+    pmLogging.LogLn("[*] USB information:");
     
     for(int i = 0; i < 5; i++)
     {
       endpoint_data_t ep = this->endpoint_data_list[i];
 
       String str = String(ep.bInterfaceNumber) + " " + String(ep.bInterfaceClass) + " " + String(ep.bInterfaceProtocol) + " " + String(ep.bCountryCode);
-      WebSerialLogger.println(str);
+      pmLogging.LogLn(str);
     }
 }
 

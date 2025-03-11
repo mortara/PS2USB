@@ -1,6 +1,43 @@
 #include "main.h"
 #include "webserver.hpp"
 
+void mqtt_callback(char* topic, byte* payload, unsigned int length) {
+    
+    String msg;
+    String topic_str = String(topic);
+    for (byte i = 0; i < length; i++) {
+        char tmp = char(payload[i]);
+        msg += tmp;
+    }
+
+    if(msg == "PRESS")
+    {
+        if(topic_str == "homeassistant/button/PS2Adapter_Mouse/LEFT")
+        {
+            PS2Devices.MoveMouse(-10, 0, 0);
+        }
+        else if(topic_str == "homeassistant/button/PS2Adapter_Mouse/RIGHT")
+        {
+            PS2Devices.MoveMouse(10, 0, 0);
+        }
+        else if(topic_str == "homeassistant/button/PS2Adapter_Mouse/UP")
+        {
+            PS2Devices.MoveMouse(0, 10, 0);
+        } else if(topic_str == "homeassistant/button/PS2Adapter_Mouse/DOWN")
+        {
+            PS2Devices.MoveMouse(0, -10, 0);
+        } else if(topic_str == "homeassistant/button/PS2Adapter_Adapter/INFO")
+        {
+            MyEspUsbHost.DisplayInfo();
+        }
+    } else if(topic_str == "homeassistant/text/PS2Adapter_Keyboard/INPUT")
+    {
+        PS2Devices.Type(msg.c_str());
+    }
+
+    pmLogging.LogLn(topic_str + ":" + msg);
+}
+
 void setup() {
 
     Serial.begin(115200);
@@ -22,11 +59,10 @@ void setup() {
    
     if (state0 == ON)
     {
+        pmCommonLib.Setup(false,false,true,false);
         Serial.println("Entering OTA only mode!");
-        OTAHandler.OTAOnly = true;
-
-        Serial.println("Starting wifi connection...");
-        WIFIManager.Connect();
+        pmCommonLib.OTAHandler.OTAOnly = true;
+        pmCommonLib.Start();
         return;
     }
 
@@ -70,12 +106,12 @@ void setup() {
 /// @param parameter 
 void Task1code( void * parameter) {
 
-    Serial.println("Starting wifi connection...");
-    WIFIManager.Connect();
+    pmCommonLib.Setup();
+    pmCommonLib.MQTTConnector.ConfigureDevice("PS2Adapter", "MK1", "Patrick Mortara");
 
-    Serial.println("Starting webserver...");
-    WebServer.Setup(handleRoot, notFound);
+    pmCommonLib.Start();
 
+    
     for(;;) {
       delay(50);
       secondary_loop();
@@ -158,18 +194,24 @@ void DisplayLoopTime()
 
 void secondary_loop()
 {
-    WIFIManager.Loop();
-    OTAHandler.Loop();
+    pmCommonLib.Loop();
     
-    if(OTAHandler.OTAOnly)
+
+    if(pmCommonLib.OTAHandler.OTAOnly)
     {
         return;
     }
 
-    if(WiFi.isConnected() && !WebSerialLogger.IsRunning())
+    if(WiFi.isConnected() && pmCommonLib.MQTTConnector.isActive())
     {
-        WebSerialLogger.Begin(WebServer.GetServer());
+        pmCommonLib.MQTTConnector.SetupButton("LEFT", "Mouse","","");
+        pmCommonLib.MQTTConnector.SetupButton("RIGHT", "Mouse","","");
+        pmCommonLib.MQTTConnector.SetupButton("UP", "Mouse","","");
+        pmCommonLib.MQTTConnector.SetupButton("DOWN", "Mouse","","");
+        pmCommonLib.MQTTConnector.SetupButton("INFO", "Adapter","","");
+        pmCommonLib.MQTTConnector.SetupText("INPUT", "Keyboard","","");
     }
+    
 }
 
 void DebugKeys()
@@ -182,7 +224,7 @@ void DebugKeys()
   }
   else
   {
-      ch = WebSerialLogger.GetInput();
+      ch = pmCommonLib.WebSerial.GetInput();
   }
 
   switch(ch)
@@ -192,28 +234,31 @@ void DebugKeys()
       case 'i':
           MyEspUsbHost.DisplayInfo();
           break;
+      case 'I':
+          pmLogging.LogLn(WiFi.localIP().toString());
+          break;
       case 'w':
           PS2Devices.MoveMouse(0, 10, 0);
-          WebSerialLogger.println("w");
+          pmLogging.LogLn("w");
           break;
       case 's':
           PS2Devices.MoveMouse(0, -10, 0);
-          WebSerialLogger.println("s");
+          pmLogging.LogLn("s");
           break;
       case 'a':  
           PS2Devices.MoveMouse(-10, 0, 0);
-          WebSerialLogger.println("a");
+          pmLogging.LogLn("a");
           break;
       case 'd':  
           PS2Devices.MoveMouse(10, 0, 0);
-          WebSerialLogger.println("d");
+          pmLogging.LogLn("d");
           break;
   }
 }
 
 void loop() 
 {
-    if(OTAHandler.OTAOnly)
+    if(pmCommonLib.OTAHandler.OTAOnly)
     {
         //Serial.println("OTA only mode!");
         secondary_loop();
