@@ -21,6 +21,7 @@
 #define OFF HIGH
 
 bool setup_done = false;
+bool mqtt_setup = false;
 bool disable_secondary_features = false;
 
 const int SWITCH_PINS[] = { 38, 39, 40, 41 };

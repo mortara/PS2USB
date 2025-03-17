@@ -202,7 +202,7 @@ void secondary_loop()
         return;
     }
 
-    if(WiFi.isConnected() && pmCommonLib.MQTTConnector.isActive())
+    if(WiFi.isConnected() && pmCommonLib.MQTTConnector.isActive() && !mqtt_setup)
     {
         pmCommonLib.MQTTConnector.SetupButton("LEFT", "Mouse","","");
         pmCommonLib.MQTTConnector.SetupButton("RIGHT", "Mouse","","");
@@ -210,6 +210,7 @@ void secondary_loop()
         pmCommonLib.MQTTConnector.SetupButton("DOWN", "Mouse","","");
         pmCommonLib.MQTTConnector.SetupButton("INFO", "Adapter","","");
         pmCommonLib.MQTTConnector.SetupText("INPUT", "Keyboard","","");
+        mqtt_setup = true;
     }
     
 }
