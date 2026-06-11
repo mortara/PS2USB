@@ -6,5 +6,6 @@
         "string": "cpp",
         "functional": "cpp",
         "ostream": "cpp"
-    }
+    },
+    "claudeCodeChat.permissions.yoloMode": true
 }

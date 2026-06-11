@@ -7,12 +7,13 @@
 class PS2DevicesClass
 {
     private:
-        esp32_ps2dev::PS2Mouse *_mouse;
-        esp32_ps2dev::PS2Keyboard *_keyboard;
+        esp32_ps2dev::PS2Mouse *_mouse = nullptr;
+        esp32_ps2dev::PS2Keyboard *_keyboard = nullptr;
        
     public:
         bool CablesSwapped = false;
 
+        ~PS2DevicesClass();
         void InitKeyboard(int clock, int data);
         void InitMouse(int clock, int data);
 

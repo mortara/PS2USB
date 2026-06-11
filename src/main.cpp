@@ -29,6 +29,9 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
         } else if(topic_str == "homeassistant/button/PS2Adapter_Adapter/INFO")
         {
             MyEspUsbHost.DisplayInfo();
+        } else if(topic_str == "homeassistant/button/PS2Adapter_Adapter/REBOOT")
+        {
+            ESP.restart();
         }
     } else if(topic_str == "homeassistant/text/PS2Adapter_Keyboard/INPUT")
     {
@@ -108,8 +111,12 @@ void Task1code( void * parameter) {
 
     pmCommonLib.Setup();
     pmCommonLib.MQTTConnector.ConfigureDevice("PS2Adapter", "MK1", "Patrick Mortara");
-
     pmCommonLib.Start();
+
+    // Register after Start() so pmCommonLib's specific routes (e.g. /config) are
+    // registered first and win against the "/" prefix match in ESPAsyncWebServer.
+    pmCommonLib.WebServer.RegisterOn("/reboot", handleReboot, HTTP_POST);
+    pmCommonLib.WebServer.RegisterOn("/", handleRoot, HTTP_GET);
 
     
     for(;;) {
@@ -144,15 +151,10 @@ void Task2code( void * parameter) {
     PS2Devices.InitMouse(mouse_clock,mouse_data);
 
     Serial.println("Initializing USB Host...");
-    MyEspUsbHost.init();
+    MyEspUsbHost.init();  // registers callbacks and starts the library's own internal task
 
     for(;;) {
-      //delay(5);
-     
-      //DisplayLoopTime();
-      
-      MyEspUsbHost.task(); 
-      delay(5);
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
 
@@ -204,6 +206,7 @@ void secondary_loop()
 
     if(WiFi.isConnected() && pmCommonLib.MQTTConnector.isActive() && !mqtt_setup)
     {
+        pmCommonLib.MQTTConnector.SetupButton("REBOOT", "Adapter","","");
         pmCommonLib.MQTTConnector.SetupButton("LEFT", "Mouse","","");
         pmCommonLib.MQTTConnector.SetupButton("RIGHT", "Mouse","","");
         pmCommonLib.MQTTConnector.SetupButton("UP", "Mouse","","");

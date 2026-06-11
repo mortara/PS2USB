@@ -1,5 +1,17 @@
 #include "ps2devices.h"
 
+PS2DevicesClass::~PS2DevicesClass()
+{
+    if (_mouse != nullptr) {
+        delete _mouse;
+        _mouse = nullptr;
+    }
+    if (_keyboard != nullptr) {
+        delete _keyboard;
+        _keyboard = nullptr;
+    }
+}
+
 void PS2DevicesClass::InitKeyboard(int clock, int data)
 {
     pinMode(clock, OUTPUT);
