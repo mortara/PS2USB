@@ -116,6 +116,8 @@ void Task1code( void * parameter) {
     // Register after Start() so pmCommonLib's specific routes (e.g. /config) are
     // registered first and win against the "/" prefix match in ESPAsyncWebServer.
     pmCommonLib.WebServer.RegisterOn("/reboot", handleReboot, HTTP_POST);
+    pmCommonLib.WebServer.RegisterOn("/ps2/keyboard", handleKeyboardEvent, HTTP_POST);
+    pmCommonLib.WebServer.RegisterOn("/ps2/mouse", handleMouseEvent, HTTP_POST);
     pmCommonLib.WebServer.RegisterOn("/", handleRoot, HTTP_GET);
 
     

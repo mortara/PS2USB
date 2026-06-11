@@ -70,4 +70,9 @@ void PS2DevicesClass::ReleaseMouseButton(esp32_ps2dev::PS2Mouse::Button button)
     _mouse->release(button);
 }
 
+void PS2DevicesClass::ClickMouseButton(esp32_ps2dev::PS2Mouse::Button button)
+{
+    _mouse->click(button);
+}
+
 PS2DevicesClass PS2Devices;

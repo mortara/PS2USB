@@ -2,7 +2,7 @@
 #include "ps2devices.h"
 #include "pmCommonLib.hpp"
 
-static esp32_ps2dev::scancodes::Key USBKeyCodeToPS2ScanCode(uint8_t keycode)
+esp32_ps2dev::scancodes::Key USBKeyCodeToPS2ScanCode(uint8_t keycode)
 {
     switch (keycode)
     {
@@ -55,6 +55,8 @@ static esp32_ps2dev::scancodes::Key USBKeyCodeToPS2ScanCode(uint8_t keycode)
       case 51:  return esp32_ps2dev::scancodes::Key::K_SEMICOLON;
       case 54:  return esp32_ps2dev::scancodes::Key::K_COMMA;
       case 55:  return esp32_ps2dev::scancodes::Key::K_PERIOD;
+      case 56:  return esp32_ps2dev::scancodes::Key::K_SLASH;
+      case 57:  return esp32_ps2dev::scancodes::Key::K_CAPSLOCK;
       case 58:  return esp32_ps2dev::scancodes::Key::K_F1;
       case 59:  return esp32_ps2dev::scancodes::Key::K_F2;
       case 60:  return esp32_ps2dev::scancodes::Key::K_F3;
@@ -67,13 +69,43 @@ static esp32_ps2dev::scancodes::Key USBKeyCodeToPS2ScanCode(uint8_t keycode)
       case 67:  return esp32_ps2dev::scancodes::Key::K_F10;
       case 68:  return esp32_ps2dev::scancodes::Key::K_F11;
       case 69:  return esp32_ps2dev::scancodes::Key::K_F12;
+      case 70:  return esp32_ps2dev::scancodes::Key::K_PRINT;
+      case 71:  return esp32_ps2dev::scancodes::Key::K_SCROLLOCK;
+      case 72:  return esp32_ps2dev::scancodes::Key::K_PAUSE;
+      case 73:  return esp32_ps2dev::scancodes::Key::K_INSERT;
+      case 74:  return esp32_ps2dev::scancodes::Key::K_HOME;
+      case 75:  return esp32_ps2dev::scancodes::Key::K_PAGEUP;
+      case 76:  return esp32_ps2dev::scancodes::Key::K_DELETE;
+      case 77:  return esp32_ps2dev::scancodes::Key::K_END;
+      case 78:  return esp32_ps2dev::scancodes::Key::K_PAGEDOWN;
+      case 79:  return esp32_ps2dev::scancodes::Key::K_RIGHT;
+      case 80:  return esp32_ps2dev::scancodes::Key::K_LEFT;
+      case 81:  return esp32_ps2dev::scancodes::Key::K_DOWN;
+      case 82:  return esp32_ps2dev::scancodes::Key::K_UP;
+      case 83:  return esp32_ps2dev::scancodes::Key::K_NUMLOCK;
+      case 84:  return esp32_ps2dev::scancodes::Key::K_KP_DIVIDE;
+      case 85:  return esp32_ps2dev::scancodes::Key::K_KP_MULTIPLY;
+      case 86:  return esp32_ps2dev::scancodes::Key::K_KP_MINUS;
+      case 87:  return esp32_ps2dev::scancodes::Key::K_KP_PLUS;
+      case 88:  return esp32_ps2dev::scancodes::Key::K_KP_ENTER;
+      case 89:  return esp32_ps2dev::scancodes::Key::K_KP1;
+      case 90:  return esp32_ps2dev::scancodes::Key::K_KP2;
+      case 91:  return esp32_ps2dev::scancodes::Key::K_KP3;
+      case 92:  return esp32_ps2dev::scancodes::Key::K_KP4;
+      case 93:  return esp32_ps2dev::scancodes::Key::K_KP5;
+      case 94:  return esp32_ps2dev::scancodes::Key::K_KP6;
+      case 95:  return esp32_ps2dev::scancodes::Key::K_KP7;
+      case 96:  return esp32_ps2dev::scancodes::Key::K_KP8;
+      case 97:  return esp32_ps2dev::scancodes::Key::K_KP9;
+      case 98:  return esp32_ps2dev::scancodes::Key::K_KP0;
+      case 99:  return esp32_ps2dev::scancodes::Key::K_KP_PERIOD;
       // Modifier keycodes 0xE0–0xE7
       case 0xE0: return esp32_ps2dev::scancodes::Key::K_LCTRL;
       case 0xE1: return esp32_ps2dev::scancodes::Key::K_LSHIFT;
       case 0xE2: return esp32_ps2dev::scancodes::Key::K_LALT;
-      case 0xE4: return esp32_ps2dev::scancodes::Key::K_LCTRL;  // RCTRL
+      case 0xE4: return esp32_ps2dev::scancodes::Key::K_RCTRL;
       case 0xE5: return esp32_ps2dev::scancodes::Key::K_RSHIFT;
-      case 0xE6: return esp32_ps2dev::scancodes::Key::K_LALT;   // RALT
+      case 0xE6: return esp32_ps2dev::scancodes::Key::K_RALT;
       default:
         return (esp32_ps2dev::scancodes::Key)(keycode - 3);
     }
@@ -130,9 +162,9 @@ void MyEspUsbHostClass::init()
             chk(0x01, esp32_ps2dev::scancodes::Key::K_LCTRL);
             chk(0x02, esp32_ps2dev::scancodes::Key::K_LSHIFT);
             chk(0x04, esp32_ps2dev::scancodes::Key::K_LALT);
-            chk(0x10, esp32_ps2dev::scancodes::Key::K_LCTRL);  // RCTRL
+            chk(0x10, esp32_ps2dev::scancodes::Key::K_RCTRL);
             chk(0x20, esp32_ps2dev::scancodes::Key::K_RSHIFT);
-            chk(0x40, esp32_ps2dev::scancodes::Key::K_LALT);   // RALT
+            chk(0x40, esp32_ps2dev::scancodes::Key::K_RALT);
             lastModifiers = mod;
         }
 
@@ -152,27 +184,30 @@ void MyEspUsbHostClass::init()
     });
 
     usb.onMouse([](const EspUsbHostMouseEvent& evt) {
-        static uint8_t prevButtons = 0;
-        static bool loggedFormat = false;
+        static uint8_t loggedSamples = 0;
 
-        // Log both raw and report data on first event so the format can be verified
-        if (!loggedFormat) {
+        // Log a few samples so the parsed values can be compared with raw data.
+        if (loggedSamples < 5) {
             String msg = "[Mouse] reportData(len=" + String(evt.reportLength) + "):";
             if (evt.reportData) {
-                for (size_t i = 0; i < min((size_t)6, evt.reportLength); i++)
+                for (size_t i = 0; i < min((size_t)8, evt.reportLength); i++)
                     msg += " " + String(evt.reportData[i], HEX);
             } else {
                 msg += " NULL";
             }
             msg += " | rawData(len=" + String(evt.rawLength) + "):";
             if (evt.rawData) {
-                for (size_t i = 0; i < min((size_t)6, evt.rawLength); i++)
+                for (size_t i = 0; i < min((size_t)8, evt.rawLength); i++)
                     msg += " " + String(evt.rawData[i], HEX);
             } else {
                 msg += " NULL";
             }
+            msg += " | parsed x=" + String(evt.x) +
+                   " y=" + String(evt.y) +
+                   " wheel=" + String(evt.wheel) +
+                   " buttons=0x" + String(evt.buttons, HEX);
             pmLogging.LogLn(msg);
-            loggedFormat = true;
+            loggedSamples++;
         }
 
         // Prefer reportData (library already stripped the Report ID).
@@ -224,8 +259,17 @@ void MyEspUsbHostClass::init()
             wheel   = (len >= 4) ? (int8_t)data[3] : 0;
         }
 
+        // EspUsbHost already strips report IDs and parses boot-mouse reports.
+        // Trust that result here; guessing from payload length misreads common
+        // 5-byte reports as 16-bit axes and creates huge PS/2 deltas.
+        buttons = evt.buttons & 0x07;
+        uint8_t previousButtons = evt.previousButtons & 0x07;
+        x = evt.x;
+        y = evt.y;
+        wheel = (int8_t)constrain(evt.wheel, -128, 127);
+
         bool moved       = (x != 0 || y != 0 || wheel != 0);
-        bool btnsChanged = (buttons != prevButtons);
+        bool btnsChanged = (buttons != previousButtons);
 
         if (moved) {
             PS2Devices.MoveMouse(x, (int16_t)-y, wheel);
@@ -237,7 +281,7 @@ void MyEspUsbHostClass::init()
         }
 
         if (btnsChanged) {
-            uint8_t changed = buttons ^ prevButtons;
+            uint8_t changed = buttons ^ previousButtons;
 
             if (changed & 0x01) {
                 if (buttons & 0x01) {
@@ -272,7 +316,6 @@ void MyEspUsbHostClass::init()
                     strncpy(MyEspUsbHost.lastMouseButton.description, "Middle released", 31);
                 }
             }
-            prevButtons = buttons;
             MyEspUsbHost.lastMouseButton.time = millis();
         }
     });

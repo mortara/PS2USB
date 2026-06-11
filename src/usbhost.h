@@ -4,6 +4,9 @@
 #define USBHOST_H
 
 #include "EspUsbHost.h"
+#include <PS2Keyboard.hpp>
+
+esp32_ps2dev::scancodes::Key USBKeyCodeToPS2ScanCode(uint8_t keycode);
 
 class MyEspUsbHostClass {
 public:
