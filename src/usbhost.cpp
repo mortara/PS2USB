@@ -233,19 +233,21 @@ void MyEspUsbHostClass::init()
         int16_t y = evt.y;  // int8(rpt[2]) is correct for |Y| <= 127
         int8_t  wheel = 0;
 
-        // Layout after report ID strip (confirmed from raw capture):
-        //   r[0] = buttons
-        //   r[1] = scroll wheel (8-bit; 0 when not scrolling)
-        //   r[2] = X[7:0]
-        //   r[3] = X[11:8] (low nibble) | Y[3:0] (high nibble)
-        //   r[4] = Y[11:4]
+        // Layout confirmed from HID report descriptor (report ID 0x02, after strip):
+        //   r[0]      = buttons 1-8  (bit0=left, bit1=right, bit2=middle)
+        //   r[1]      = buttons 9-16 (usually 0)
+        //   r[2]      = X[7:0]
+        //   r[3]      = X[11:8] (low nibble) | Y[3:0] (high nibble)
+        //   r[4]      = Y[11:4]
+        //   r[5]      = Wheel  (8-bit signed, ±127)
+        //   r[6]      = AC Pan (8-bit signed, horizontal scroll — ignored for PS/2)
         if (evt.reportData && evt.reportLength >= 5) {
             const uint8_t *r = (const uint8_t *)evt.reportData;
             uint16_t xRaw = (uint16_t)r[2] | ((uint16_t)(r[3] & 0x0F) << 8);
             uint16_t yRaw = (uint16_t)(r[3] >> 4) | ((uint16_t)r[4] << 4);
             x = (xRaw & 0x800) ? (int16_t)(xRaw | 0xF000) : (int16_t)xRaw;
             y = (yRaw & 0x800) ? (int16_t)(yRaw | 0xF000) : (int16_t)yRaw;
-            wheel = (int8_t)r[1];
+            wheel = (evt.reportLength >= 6) ? (int8_t)r[5] : 0;
         }
 
         bool moved       = (x != 0 || y != 0 || wheel != 0);
