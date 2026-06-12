@@ -1,7 +1,38 @@
+#pragma once
 #include "Arduino.h"
 #include "pmCommonLib.hpp"
 #include "ps2devices.h"
 #include "usbhost.h"
+#include "freertos/queue.h"
+
+// PS/2 command queue — used to marshal PS/2 calls from Core 0 (web/MQTT)
+// to Core 1 (where the PS/2 library tasks run).
+enum class PS2CmdType : uint8_t {
+    MOUSE_MOVE,
+    MOUSE_PRESS,
+    MOUSE_RELEASE,
+    MOUSE_CLICK,
+    KEY_DOWN,
+    KEY_UP,
+    TYPE_TEXT,
+};
+
+struct PS2Cmd {
+    PS2CmdType type;
+    union {
+        struct { int16_t x; int16_t y; int8_t wheel; } move;
+        struct { esp32_ps2dev::PS2Mouse::Button button; } mouseBtn;
+        struct { esp32_ps2dev::scancodes::Key key; } key;
+        char text[241];
+    };
+};
+
+extern QueueHandle_t ps2CmdQueue;
+
+// Enqueue a PS/2 command from any core. Non-blocking; drops if queue full.
+inline void ps2Enqueue(const PS2Cmd& cmd) {
+    xQueueSend(ps2CmdQueue, &cmd, 0);
+}
 
 
 // Lindy Kabel

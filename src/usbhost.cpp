@@ -143,8 +143,26 @@ void MyEspUsbHostClass::init()
         MyEspUsbHost.lastMouseMove.totalMoves = 0;
         MyEspUsbHost.lastMouseButton.time = 0;
         MyEspUsbHost.lastMouseButton.description[0] = '\0';
-        // reset raw-format log flag so reconnect logs the format again
-        // (done via onMouse static — no direct access; harmless, will not re-log until reboot)
+        MyEspUsbHost.hidDesc.valid = false;
+        MyEspUsbHost.hidDesc.length = 0;
+    });
+
+    usb.onHIDReportDescriptor([](const EspUsbHostHIDReportDescriptor& desc) {
+        auto &d = MyEspUsbHost.hidDesc;
+        d.interfaceNumber = desc.interfaceNumber;
+        d.length = (desc.length <= sizeof(d.data)) ? desc.length : (uint16_t)sizeof(d.data);
+        memcpy(d.data, desc.data, d.length);
+        d.valid = true;
+        pmLogging.LogLn("[USB] HID descriptor: iface=" + String(desc.interfaceNumber) +
+                        " len=" + String(desc.length));
+    });
+
+    usb.onHIDInput([](const EspUsbHostHIDInput& input) {
+        // Capture the interface subclass/protocol alongside the descriptor
+        if (MyEspUsbHost.hidDesc.interfaceNumber == input.interfaceNumber) {
+            MyEspUsbHost.hidDesc.subClass = input.subclass;
+            MyEspUsbHost.hidDesc.protocol = input.protocol;
+        }
     });
 
     usb.onKeyboard([](const EspUsbHostKeyboardEvent& evt) {
@@ -184,95 +202,66 @@ void MyEspUsbHostClass::init()
     });
 
     usb.onMouse([](const EspUsbHostMouseEvent& evt) {
-        static uint8_t loggedSamples = 0;
+        // Store in ring buffer for the web diagnostic view.
+        uint8_t idx = MyEspUsbHost.mouseRawHead;
+        auto &entry = MyEspUsbHost.mouseRawLog[idx];
+        entry.time       = millis();
+        entry.rawLen     = (uint8_t)min(evt.rawLength,  (size_t)MyEspUsbHostClass::MOUSE_RAW_MAX_BYTES);
+        entry.rptLen     = (uint8_t)min(evt.reportLength,(size_t)MyEspUsbHostClass::MOUSE_RAW_MAX_BYTES);
+        if (evt.rawData)    memcpy(entry.rawData, evt.rawData,    entry.rawLen);
+        if (evt.reportData) memcpy(entry.rptData, evt.reportData, entry.rptLen);
+        entry.libX       = evt.x;
+        entry.libY       = evt.y;
+        entry.libWheel   = (int8_t)constrain(evt.wheel, -128, 127);
+        entry.libButtons = evt.buttons;
+        MyEspUsbHost.mouseRawHead = (idx + 1) % MyEspUsbHostClass::MOUSE_RAW_LOG_SIZE;
 
-        // Log a few samples so the parsed values can be compared with raw data.
-        if (loggedSamples < 5) {
-            String msg = "[Mouse] reportData(len=" + String(evt.reportLength) + "):";
-            if (evt.reportData) {
-                for (size_t i = 0; i < min((size_t)8, evt.reportLength); i++)
-                    msg += " " + String(evt.reportData[i], HEX);
-            } else {
-                msg += " NULL";
-            }
-            msg += " | rawData(len=" + String(evt.rawLength) + "):";
-            if (evt.rawData) {
-                for (size_t i = 0; i < min((size_t)8, evt.rawLength); i++)
-                    msg += " " + String(evt.rawData[i], HEX);
-            } else {
-                msg += " NULL";
-            }
-            msg += " | parsed x=" + String(evt.x) +
-                   " y=" + String(evt.y) +
-                   " wheel=" + String(evt.wheel) +
-                   " buttons=0x" + String(evt.buttons, HEX);
-            pmLogging.LogLn(msg);
-            loggedSamples++;
-        }
-
-        // Prefer reportData (library already stripped the Report ID).
-        // Fall back to rawData; skip the first byte (Report ID) only when the payload is
-        // long enough that the ID prefix is highly likely (>= 6 bytes suggests ID + 16-bit data).
-        const uint8_t *data = nullptr;
-        size_t         len  = 0;
-        if (evt.reportData && evt.reportLength >= 3) {
-            data = evt.reportData;
-            len  = evt.reportLength;
-        } else if (evt.rawData && evt.rawLength >= 6) {
-            data = evt.rawData + 1;   // skip Report ID at byte 0
-            len  = evt.rawLength - 1;
-        } else if (evt.rawData && evt.rawLength >= 3) {
-            data = evt.rawData;
-            len  = evt.rawLength;
-        } else {
-            return;
-        }
-
-        // Axis layout detection from payload length:
+        // This mouse uses a 12-bit packed report (after the library strips the 0x02 report ID):
+        //   byte[0] = buttons
+        //   byte[1] = X[7:0]
+        //   byte[2] = Y[7:0]
+        //   byte[3] = Y[11:8] (low nibble) | X[11:8] (high nibble)
+        //   byte[4] = scroll wheel (8-bit)
         //
-        //  len >= 6: [extra, buttons, X_lo, X_hi, Y_lo, Y_hi, wheel?]
-        //            The leading byte is an un-stripped report ID or a padding/extension
-        //            byte. Buttons start at byte 1.
-        //
-        //  len == 5: [buttons, X_lo, X_hi, Y_lo, Y_hi]
-        //            Standard 16-bit, no extra byte.
-        //
-        //  len 3–4:  [buttons, X8, Y8, wheel?]
-        //            8-bit per axis (older / boot-protocol mice).
-        uint8_t buttons;
-        int16_t x, y;
-        int8_t  wheel;
-        if (len >= 6) {
-            buttons = data[1] & 0x07;
-            x       = (int16_t)((uint16_t)data[2] | ((uint16_t)data[3] << 8));
-            y       = (int16_t)((uint16_t)data[4] | ((uint16_t)data[5] << 8));
-            wheel   = (len >= 7) ? (int8_t)data[6] : 0;
-        } else if (len == 5) {
-            buttons = data[0] & 0x07;
-            x       = (int16_t)((uint16_t)data[1] | ((uint16_t)data[2] << 8));
-            y       = (int16_t)((uint16_t)data[3] | ((uint16_t)data[4] << 8));
-            wheel   = 0;
-        } else {
-            buttons = data[0] & 0x07;
-            x       = (int8_t)data[1];
-            y       = (int8_t)data[2];
-            wheel   = (len >= 4) ? (int8_t)data[3] : 0;
-        }
-
-        // EspUsbHost already strips report IDs and parses boot-mouse reports.
-        // Trust that result here; guessing from payload length misreads common
-        // 5-byte reports as 16-bit axes and creates huge PS/2 deltas.
-        buttons = evt.buttons & 0x07;
+        // The library misreads byte[3] as the wheel field, which is actually the
+        // packed high nibbles of X and Y.  This would send wheel=15 to the PS/2 host
+        // on every Y=-1 movement.  Parse reportData directly instead.
+        uint8_t buttons         = evt.buttons & 0x07;
         uint8_t previousButtons = evt.previousButtons & 0x07;
-        x = evt.x;
-        y = evt.y;
-        wheel = (int8_t)constrain(evt.wheel, -128, 127);
+
+        int16_t x = evt.x;  // int8(rpt[1]) is correct for |X| <= 127
+        int16_t y = evt.y;  // int8(rpt[2]) is correct for |Y| <= 127
+        int8_t  wheel = 0;
+
+        // Layout after report ID strip (confirmed from raw capture):
+        //   r[0] = buttons
+        //   r[1] = scroll wheel (8-bit; 0 when not scrolling)
+        //   r[2] = X[7:0]
+        //   r[3] = X[11:8] (low nibble) | Y[3:0] (high nibble)
+        //   r[4] = Y[11:4]
+        if (evt.reportData && evt.reportLength >= 5) {
+            const uint8_t *r = (const uint8_t *)evt.reportData;
+            uint16_t xRaw = (uint16_t)r[2] | ((uint16_t)(r[3] & 0x0F) << 8);
+            uint16_t yRaw = (uint16_t)(r[3] >> 4) | ((uint16_t)r[4] << 4);
+            x = (xRaw & 0x800) ? (int16_t)(xRaw | 0xF000) : (int16_t)xRaw;
+            y = (yRaw & 0x800) ? (int16_t)(yRaw | 0xF000) : (int16_t)yRaw;
+            wheel = (int8_t)r[1];
+        }
 
         bool moved       = (x != 0 || y != 0 || wheel != 0);
         bool btnsChanged = (buttons != previousButtons);
 
         if (moved) {
-            PS2Devices.MoveMouse(x, (int16_t)-y, wheel);
+            // Clamp to ±127 before handing to the PS/2 library.
+            // The PS/2 protocol sets overflow bits when |value| > 255, and many
+            // retro PS/2 host drivers react to overflow with wild cursor jumps or
+            // a mouse reset. ±127 also matches what the old boot-protocol int8_t
+            // gave us, and survives the PS/2 host's optional 2:1 scale mode
+            // (127 × 2 = 254, safely below the 255 overflow threshold).
+            auto clamp7 = [](int16_t v) -> int16_t {
+                return v > 127 ? 127 : (v < -127 ? -127 : v);
+            };
+            PS2Devices.MoveMouse(clamp7(x), clamp7((int16_t)-y), wheel);
             MyEspUsbHost.lastMouseMove.time = millis();
             MyEspUsbHost.lastMouseMove.x = x;
             MyEspUsbHost.lastMouseMove.y = y;

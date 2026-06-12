@@ -1,6 +1,8 @@
 #include "main.h"
 #include "webserver.hpp"
 
+QueueHandle_t ps2CmdQueue;
+
 void mqtt_callback(char* topic, byte* payload, unsigned int length) {
     
     String msg;
@@ -12,36 +14,54 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
 
     if(msg == "PRESS")
     {
+        PS2Cmd cmd;
         if(topic_str == "homeassistant/button/PS2Adapter_Mouse/LEFT")
         {
-            PS2Devices.MoveMouse(-10, 0, 0);
+            cmd.type = PS2CmdType::MOUSE_MOVE;
+            cmd.move.x = -10; cmd.move.y = 0; cmd.move.wheel = 0;
+            ps2Enqueue(cmd);
         }
         else if(topic_str == "homeassistant/button/PS2Adapter_Mouse/RIGHT")
         {
-            PS2Devices.MoveMouse(10, 0, 0);
+            cmd.type = PS2CmdType::MOUSE_MOVE;
+            cmd.move.x = 10; cmd.move.y = 0; cmd.move.wheel = 0;
+            ps2Enqueue(cmd);
         }
         else if(topic_str == "homeassistant/button/PS2Adapter_Mouse/UP")
         {
-            PS2Devices.MoveMouse(0, 10, 0);
-        } else if(topic_str == "homeassistant/button/PS2Adapter_Mouse/DOWN")
+            cmd.type = PS2CmdType::MOUSE_MOVE;
+            cmd.move.x = 0; cmd.move.y = 10; cmd.move.wheel = 0;
+            ps2Enqueue(cmd);
+        }
+        else if(topic_str == "homeassistant/button/PS2Adapter_Mouse/DOWN")
         {
-            PS2Devices.MoveMouse(0, -10, 0);
-        } else if(topic_str == "homeassistant/button/PS2Adapter_Adapter/INFO")
+            cmd.type = PS2CmdType::MOUSE_MOVE;
+            cmd.move.x = 0; cmd.move.y = -10; cmd.move.wheel = 0;
+            ps2Enqueue(cmd);
+        }
+        else if(topic_str == "homeassistant/button/PS2Adapter_Adapter/INFO")
         {
             MyEspUsbHost.DisplayInfo();
-        } else if(topic_str == "homeassistant/button/PS2Adapter_Adapter/REBOOT")
+        }
+        else if(topic_str == "homeassistant/button/PS2Adapter_Adapter/REBOOT")
         {
             ESP.restart();
         }
     } else if(topic_str == "homeassistant/text/PS2Adapter_Keyboard/INPUT")
     {
-        PS2Devices.Type(msg.c_str());
+        PS2Cmd cmd;
+        cmd.type = PS2CmdType::TYPE_TEXT;
+        strncpy(cmd.text, msg.c_str(), sizeof(cmd.text) - 1);
+        cmd.text[sizeof(cmd.text) - 1] = '\0';
+        ps2Enqueue(cmd);
     }
 
     pmLogging.LogLn(topic_str + ":" + msg);
 }
 
 void setup() {
+
+    ps2CmdQueue = xQueueCreate(16, sizeof(PS2Cmd));
 
     Serial.begin(115200);
     Serial.println("Hello, world!");
@@ -155,8 +175,34 @@ void Task2code( void * parameter) {
     Serial.println("Initializing USB Host...");
     MyEspUsbHost.init();  // registers callbacks and starts the library's own internal task
 
+    PS2Cmd cmd;
     for(;;) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        // Block up to 10 ms waiting for the next command, then loop.
+        while (xQueueReceive(ps2CmdQueue, &cmd, pdMS_TO_TICKS(10)) == pdTRUE) {
+            switch (cmd.type) {
+                case PS2CmdType::MOUSE_MOVE:
+                    PS2Devices.MoveMouse(cmd.move.x, cmd.move.y, cmd.move.wheel);
+                    break;
+                case PS2CmdType::MOUSE_PRESS:
+                    PS2Devices.PressMouseButton(cmd.mouseBtn.button);
+                    break;
+                case PS2CmdType::MOUSE_RELEASE:
+                    PS2Devices.ReleaseMouseButton(cmd.mouseBtn.button);
+                    break;
+                case PS2CmdType::MOUSE_CLICK:
+                    PS2Devices.ClickMouseButton(cmd.mouseBtn.button);
+                    break;
+                case PS2CmdType::KEY_DOWN:
+                    PS2Devices.KeyDown(cmd.key.key);
+                    break;
+                case PS2CmdType::KEY_UP:
+                    PS2Devices.KeyUp(cmd.key.key);
+                    break;
+                case PS2CmdType::TYPE_TEXT:
+                    PS2Devices.Type(cmd.text);
+                    break;
+            }
+        }
     }
 }
 

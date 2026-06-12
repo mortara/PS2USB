@@ -1,6 +1,7 @@
 #include "Webserver/webserver.hpp"
 #include "ps2devices.h"
 #include "usbhost.h"
+#include "main.h"
 
 
 String getDeviceTypeName(uint8_t cls, uint8_t subclass, uint8_t protocol) {
@@ -77,7 +78,11 @@ void handleReboot(AsyncWebServerRequest *request) {
 void handleKeyboardEvent(AsyncWebServerRequest *request) {
     String text = postValue(request, "text");
     if (text.length() > 0) {
-        PS2Devices.Type(text.c_str());
+        PS2Cmd cmd;
+        cmd.type = PS2CmdType::TYPE_TEXT;
+        strncpy(cmd.text, text.c_str(), sizeof(cmd.text) - 1);
+        cmd.text[sizeof(cmd.text) - 1] = '\0';
+        ps2Enqueue(cmd);
         pmLogging.LogLn("[WEB] Keyboard text sent (" + String(text.length()) + " bytes)");
         request->redirect("/");
         return;
@@ -98,14 +103,18 @@ void handleKeyboardEvent(AsyncWebServerRequest *request) {
     auto key = USBKeyCodeToPS2ScanCode(keycode);
     String action = postValue(request, "action", "tap");
 
+    PS2Cmd cmd;
     if (action == "down") {
-        PS2Devices.KeyDown(key);
+        cmd.type = PS2CmdType::KEY_DOWN; cmd.key.key = key;
+        ps2Enqueue(cmd);
     } else if (action == "up") {
-        PS2Devices.KeyUp(key);
+        cmd.type = PS2CmdType::KEY_UP; cmd.key.key = key;
+        ps2Enqueue(cmd);
     } else if (action == "tap") {
-        PS2Devices.KeyDown(key);
-        delay(20);
-        PS2Devices.KeyUp(key);
+        cmd.type = PS2CmdType::KEY_DOWN; cmd.key.key = key;
+        ps2Enqueue(cmd);
+        cmd.type = PS2CmdType::KEY_UP;
+        ps2Enqueue(cmd);
     } else {
         request->send(400, "text/plain", "Unsupported keyboard action");
         return;
@@ -127,7 +136,10 @@ void handleMouseEvent(AsyncWebServerRequest *request) {
         int8_t wheel = (int8_t)postInt(request, "wheel", 0, -20, 20);
 
         if (dx != 0 || dy != 0 || wheel != 0) {
-            PS2Devices.MoveMouse(dx, dy, wheel);
+            PS2Cmd cmd;
+            cmd.type = PS2CmdType::MOUSE_MOVE;
+            cmd.move.x = dx; cmd.move.y = dy; cmd.move.wheel = wheel;
+            ps2Enqueue(cmd);
             MyEspUsbHost.lastMouseMove.time = millis();
             MyEspUsbHost.lastMouseMove.x = dx;
             MyEspUsbHost.lastMouseMove.y = dy;
@@ -149,12 +161,17 @@ void handleMouseEvent(AsyncWebServerRequest *request) {
         }
 
         String action = postValue(request, "action", "click");
+        PS2Cmd cmd;
+        cmd.mouseBtn.button = button;
         if (action == "down") {
-            PS2Devices.PressMouseButton(button);
+            cmd.type = PS2CmdType::MOUSE_PRESS;
+            ps2Enqueue(cmd);
         } else if (action == "up") {
-            PS2Devices.ReleaseMouseButton(button);
+            cmd.type = PS2CmdType::MOUSE_RELEASE;
+            ps2Enqueue(cmd);
         } else if (action == "click") {
-            PS2Devices.ClickMouseButton(button);
+            cmd.type = PS2CmdType::MOUSE_CLICK;
+            ps2Enqueue(cmd);
         } else {
             request->send(400, "text/plain", "Unsupported mouse button action");
             return;
@@ -389,7 +406,84 @@ void handleRoot(AsyncWebServerRequest *request) {
         }
     }
 
-    html += "<script>setTimeout(()=>{if(!document.querySelector('input:focus,textarea:focus,select:focus'))location.reload();},3000);</script>";
+    // ── HID descriptor ───────────────────────────────────────────────────────
+    html += "<h2>USB HID Descriptor</h2>";
+    if (MyEspUsbHost.hidDesc.valid) {
+        html += "<p style='margin:4px 0'><b>Interface:</b> " +
+                String(MyEspUsbHost.hidDesc.interfaceNumber) +
+                " &nbsp; <b>SubClass:</b> 0x" ;
+        { char b[3]; snprintf(b,sizeof(b),"%02X",MyEspUsbHost.hidDesc.subClass); html+=b; }
+        html += " &nbsp; <b>Protocol:</b> 0x";
+        { char b[3]; snprintf(b,sizeof(b),"%02X",MyEspUsbHost.hidDesc.protocol); html+=b; }
+        html += " &nbsp; <b>Len:</b> " + String(MyEspUsbHost.hidDesc.length) + "</p>";
+        html += "<textarea readonly rows='4' style='width:100%;font-family:monospace;font-size:0.85em'>";
+        for (uint16_t i = 0; i < MyEspUsbHost.hidDesc.length; i++) {
+            if (i && (i % 16 == 0)) html += "\n";
+            else if (i) html += " ";
+            char b[3]; snprintf(b,sizeof(b),"%02X",MyEspUsbHost.hidDesc.data[i]); html+=b;
+        }
+        html += "</textarea>"
+                "<p style='font-size:0.8em;color:#666'>Paste the hex bytes into "
+                "<a href='https://eleccelerator.com/usbdescreqparser/' target='_blank'>"
+                "eleccelerator.com/usbdescreqparser</a> to decode field layout.</p>";
+    } else {
+        html += "<p><i>No device connected (or descriptor not yet received).</i></p>";
+    }
+
+    // ── Raw USB mouse log ─────────────────────────────────────────────────────
+    html += "<h2>USB Mouse Raw Data"
+            " <label style='font-size:0.85em;font-weight:normal;margin-left:8px'>"
+            "<input type='checkbox' id='rawChk' onchange=\""
+            "localStorage.setItem('rawLog',this.checked);"
+            "document.getElementById('rawlog').style.display=this.checked?'block':'none';"
+            "\"> Show raw reports</label></h2>"
+            "<div id='rawlog' style='display:none'>";
+
+    // Build the table (newest entry first)
+    html += "<table><tr><th>Age</th><th>rawLen</th><th>rawData</th>"
+            "<th>rptLen</th><th>rptData</th>"
+            "<th>lib&nbsp;x</th><th>lib&nbsp;y</th><th>lib&nbsp;w</th><th>btn</th></tr>";
+
+    uint8_t head = MyEspUsbHost.mouseRawHead;
+    for (uint8_t i = 0; i < MyEspUsbHostClass::MOUSE_RAW_LOG_SIZE; i++) {
+        // Walk backwards from the slot before head (most recent first)
+        uint8_t idx = (head + MyEspUsbHostClass::MOUSE_RAW_LOG_SIZE - 1 - i)
+                      % MyEspUsbHostClass::MOUSE_RAW_LOG_SIZE;
+        const auto &e = MyEspUsbHost.mouseRawLog[idx];
+        if (e.time == 0) continue;
+
+        html += "<tr><td>" + elapsedStr(e.time) + "</td>";
+        html += "<td>" + String(e.rawLen) + "</td><td>";
+        for (uint8_t b = 0; b < e.rawLen; b++) {
+            if (b) html += " ";
+            char buf[3]; snprintf(buf, sizeof(buf), "%02X", e.rawData[b]);
+            html += buf;
+        }
+        html += "</td><td>" + String(e.rptLen) + "</td><td>";
+        for (uint8_t b = 0; b < e.rptLen; b++) {
+            if (b) html += " ";
+            char buf[3]; snprintf(buf, sizeof(buf), "%02X", e.rptData[b]);
+            html += buf;
+        }
+        html += "</td>";
+        html += "<td>" + String(e.libX)  + "</td>";
+        html += "<td>" + String(e.libY)  + "</td>";
+        html += "<td>" + String(e.libWheel) + "</td>";
+        char btnbuf[5]; snprintf(btnbuf, sizeof(btnbuf), "0x%02X", e.libButtons);
+        html += "<td>" + String(btnbuf) + "</td></tr>";
+    }
+    html += "</table></div>";
+
+    html += "<script>"
+            "setTimeout(()=>{if(!document.querySelector('input:focus,textarea:focus,select:focus'))location.reload();},3000);"
+            // Restore checkbox + visibility from localStorage on every load
+            "(function(){"
+            "var v=localStorage.getItem('rawLog')==='true';"
+            "var cb=document.getElementById('rawChk');"
+            "cb.checked=v;"
+            "document.getElementById('rawlog').style.display=v?'block':'none';"
+            "})();"
+            "</script>";
     html += "</body></html>";
     request->send(200, "text/html", html);
 }

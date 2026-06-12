@@ -37,6 +37,33 @@ public:
         char description[32] = {};
     } lastMouseButton;
 
+    // Ring buffer of raw USB mouse reports for diagnostics
+    static const uint8_t MOUSE_RAW_LOG_SIZE = 10;
+    static const uint8_t MOUSE_RAW_MAX_BYTES = 8;
+    struct MouseRawReport {
+        unsigned long time = 0;
+        uint8_t rawLen = 0;
+        uint8_t rawData[MOUSE_RAW_MAX_BYTES] = {};
+        uint8_t rptLen = 0;
+        uint8_t rptData[MOUSE_RAW_MAX_BYTES] = {};
+        int16_t libX = 0;
+        int16_t libY = 0;
+        int8_t  libWheel = 0;
+        uint8_t libButtons = 0;
+    };
+    MouseRawReport mouseRawLog[MOUSE_RAW_LOG_SIZE];
+    volatile uint8_t mouseRawHead = 0;  // next write index (ring buffer)
+
+    // HID report descriptor captured once on device connect
+    struct HidDescInfo {
+        uint8_t  interfaceNumber = 0;
+        uint8_t  subClass = 0;     // filled from onHIDInput
+        uint8_t  protocol = 0;     // filled from onHIDInput
+        uint16_t length = 0;
+        uint8_t  data[512] = {};
+        bool     valid = false;
+    } hidDesc;
+
     void init();
     void DisplayInfo();
 };
