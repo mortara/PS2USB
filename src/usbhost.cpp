@@ -112,14 +112,16 @@ esp32_ps2dev::scancodes::Key USBKeyCodeToPS2ScanCode(uint8_t keycode)
 }
 
 // Extract a signed integer of 'bitSize' bits from 'data' starting at 'bitOffset'.
+// Returns 0 if the field does not fit entirely within dataLen bytes.
 static int32_t extractBitsSigned(const uint8_t *data, uint16_t dataLen, uint16_t bitOffset, uint8_t bitSize) {
     if (bitSize == 0 || bitSize > 32) return 0;
-    uint16_t byteStart = bitOffset / 8;
-    uint8_t  bitShift  = bitOffset % 8;
-    if (byteStart >= dataLen) return 0;
+    uint16_t byteStart   = bitOffset / 8;
+    uint8_t  bitShift    = bitOffset % 8;
+    uint8_t  bytesNeeded = (bitShift + bitSize + 7) / 8;
+    // Reject truncated reports rather than silently returning partial data.
+    if ((uint32_t)byteStart + bytesNeeded > dataLen) return 0;
     uint32_t raw = 0;
-    uint8_t bytesNeeded = (bitShift + bitSize + 7) / 8;
-    for (uint8_t b = 0; b < bytesNeeded && (byteStart + b) < dataLen; b++)
+    for (uint8_t b = 0; b < bytesNeeded; b++)
         raw |= (uint32_t)data[byteStart + b] << (8 * b);
     raw >>= bitShift;
     uint32_t mask = (bitSize == 32) ? 0xFFFFFFFFu : ((1u << bitSize) - 1u);
@@ -137,8 +139,10 @@ static bool parseHIDMouseLayout(const uint8_t *desc, uint16_t len,
     uint8_t  reportSize = 0, reportCount = 0;
     uint8_t  reportId = 0;
 
-    // Per-report-ID accumulated bit offset (index == reportId, max 32 IDs)
-    uint16_t bitOffsets[32] = {};
+    // Per-report-ID accumulated bit offset.
+    // Index 0 is for reportId==0 (no report IDs used); IDs 1-255 are stored at index 1-255.
+    // We cap at 256 entries to cover the full uint8_t range without aliasing.
+    uint16_t bitOffsets[256] = {};
 
     uint8_t  pendingUsages[16];
     uint8_t  pendingUsageCnt = 0;
@@ -204,8 +208,7 @@ static bool parseHIDMouseLayout(const uint8_t *desc, uint16_t len,
                 }
                 collectionDepth--;
             } else if (bTag == 8) { // Input
-                uint8_t ridx = (reportId < 32) ? reportId : 0;
-                uint16_t &bitOff = bitOffsets[ridx];
+                uint16_t &bitOff = bitOffsets[reportId];
 
                 bool isConstant = (uval & 0x01) != 0;
                 if (inMouseColl && !isConstant) {
@@ -223,9 +226,23 @@ static bool parseHIDMouseLayout(const uint8_t *desc, uint16_t len,
                                 usage = pendingUsageMin + slot;
                             }
                             uint16_t fieldOff = bitOff + (uint16_t)slot * reportSize;
-                            if      (usage == 0x30) { xBitOff=fieldOff; xBits=reportSize; xMin=logMin; xMax=logMax; foundX=true; mouseReportId=reportId; }
-                            else if (usage == 0x31) { yBitOff=fieldOff; yBits=reportSize; yMin=logMin; yMax=logMax; foundY=true; }
-                            else if (usage == 0x38) { wBitOff=fieldOff; wBits=reportSize; hasWheel=true; }
+                            if (usage == 0x30) {
+                                // Starting a new X — reset Y/Wheel found flags so we don't
+                                // mix fields from a previous report ID.
+                                if (foundX && mouseReportId != reportId) { foundY=false; hasWheel=false; }
+                                xBitOff=fieldOff; xBits=reportSize; xMin=logMin; xMax=logMax;
+                                foundX=true; mouseReportId=reportId;
+                            } else if (usage == 0x31) {
+                                // Only accept Y from the same report as X.
+                                if (foundX && mouseReportId == reportId) {
+                                    yBitOff=fieldOff; yBits=reportSize; yMin=logMin; yMax=logMax; foundY=true;
+                                }
+                            } else if (usage == 0x38) {
+                                // Only accept Wheel from the same report as X.
+                                if (foundX && mouseReportId == reportId) {
+                                    wBitOff=fieldOff; wBits=reportSize; hasWheel=true;
+                                }
+                            }
                         }
                     }
                 }
@@ -396,6 +413,10 @@ void MyEspUsbHostClass::init()
             }
         }
 
+        // Mask to the 3 buttons PS/2 actually models before change detection.
+        // Extra buttons (bits 3+) from high-button mice must not create spurious
+        // press/release events or corrupt prevButtons state.
+        buttons &= 0x07;
         uint8_t previousButtons = prevButtons;
         prevButtons = buttons;
 
