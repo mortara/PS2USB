@@ -64,6 +64,30 @@ public:
         bool     valid = false;
     } hidDesc;
 
+    // Parsed mouse report layout derived from the HID descriptor.
+    // Bit offsets are relative to the report payload (after the library strips the report-ID byte).
+    struct HidMouseLayout {
+        bool     valid = false;
+        uint8_t  reportId = 0;       // 0 = device has no report IDs
+
+        uint16_t buttonBitOffset = 0;
+        uint8_t  buttonCount = 0;    // number of button bits
+
+        uint16_t xBitOffset = 0;
+        uint8_t  xBitSize = 8;
+        int32_t  xLogMin = -127;
+        int32_t  xLogMax = 127;
+
+        uint16_t yBitOffset = 0;
+        uint8_t  yBitSize = 8;
+        int32_t  yLogMin = -127;
+        int32_t  yLogMax = 127;
+
+        bool     wheelPresent = false;
+        uint16_t wheelBitOffset = 0;
+        uint8_t  wheelBitSize = 8;
+    } mouseLayout;
+
     void init();
     void DisplayInfo();
 };

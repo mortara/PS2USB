@@ -111,6 +111,145 @@ esp32_ps2dev::scancodes::Key USBKeyCodeToPS2ScanCode(uint8_t keycode)
     }
 }
 
+// Extract a signed integer of 'bitSize' bits from 'data' starting at 'bitOffset'.
+static int32_t extractBitsSigned(const uint8_t *data, uint16_t dataLen, uint16_t bitOffset, uint8_t bitSize) {
+    if (bitSize == 0 || bitSize > 32) return 0;
+    uint16_t byteStart = bitOffset / 8;
+    uint8_t  bitShift  = bitOffset % 8;
+    if (byteStart >= dataLen) return 0;
+    uint32_t raw = 0;
+    uint8_t bytesNeeded = (bitShift + bitSize + 7) / 8;
+    for (uint8_t b = 0; b < bytesNeeded && (byteStart + b) < dataLen; b++)
+        raw |= (uint32_t)data[byteStart + b] << (8 * b);
+    raw >>= bitShift;
+    uint32_t mask = (bitSize == 32) ? 0xFFFFFFFFu : ((1u << bitSize) - 1u);
+    raw &= mask;
+    if (raw & (1u << (bitSize - 1))) raw |= ~mask;  // sign-extend
+    return (int32_t)raw;
+}
+
+// Walk a raw HID report descriptor and extract the mouse report layout.
+// Returns true if X and Y axes were found.
+static bool parseHIDMouseLayout(const uint8_t *desc, uint16_t len,
+                                MyEspUsbHostClass::HidMouseLayout &out) {
+    uint8_t  usagePage = 0;
+    int32_t  logMin = 0, logMax = 0;
+    uint8_t  reportSize = 0, reportCount = 0;
+    uint8_t  reportId = 0;
+
+    // Per-report-ID accumulated bit offset (index == reportId, max 32 IDs)
+    uint16_t bitOffsets[32] = {};
+
+    uint8_t  pendingUsages[16];
+    uint8_t  pendingUsageCnt = 0;
+    uint8_t  pendingUsageMin = 0, pendingUsageMax = 0;
+    bool     hasPendingRange = false;
+
+    int      collectionDepth = 0;
+    bool     inMouseColl = false;
+    int      mouseCollDepth = -1;
+
+    bool     foundX = false, foundY = false;
+    uint8_t  mouseReportId = 0;
+    uint16_t buttonBitOff = 0; uint8_t  buttonCnt = 0;
+    uint16_t xBitOff = 0;     uint8_t  xBits = 8;  int32_t xMin = -127, xMax = 127;
+    uint16_t yBitOff = 0;     uint8_t  yBits = 8;  int32_t yMin = -127, yMax = 127;
+    bool     hasWheel = false;
+    uint16_t wBitOff = 0;     uint8_t  wBits = 8;
+
+    uint16_t i = 0;
+    while (i < len) {
+        uint8_t prefix    = desc[i++];
+        uint8_t bSize     = prefix & 0x03;
+        uint8_t bType     = (prefix >> 2) & 0x03;
+        uint8_t bTag      = (prefix >> 4) & 0x0F;
+        uint8_t dataBytes = (bSize == 3) ? 4 : bSize;
+        if (i + dataBytes > len) break;
+
+        uint32_t uval = 0;
+        for (uint8_t b = 0; b < dataBytes; b++) uval |= (uint32_t)desc[i + b] << (8 * b);
+        int32_t sval = 0;
+        if      (dataBytes == 1) sval = (int8_t)(uval & 0xFF);
+        else if (dataBytes == 2) sval = (int16_t)(uval & 0xFFFF);
+        else                     sval = (int32_t)uval;
+        i += dataBytes;
+
+        if (bType == 1) { // Global
+            switch (bTag) {
+                case 0: usagePage   = (uint8_t)uval; break;
+                case 1: logMin      = sval;           break;
+                case 2: logMax      = sval;           break;
+                case 7: reportSize  = (uint8_t)uval;  break;
+                case 8: reportId    = (uint8_t)uval;  break;
+                case 9: reportCount = (uint8_t)uval;  break;
+            }
+        } else if (bType == 2) { // Local
+            if (bTag == 0 && pendingUsageCnt < 16) { // Usage
+                pendingUsages[pendingUsageCnt++] = (uint8_t)uval;
+            } else if (bTag == 1) { pendingUsageMin = (uint8_t)uval; hasPendingRange = true; }
+            else if   (bTag == 2) { pendingUsageMax = (uint8_t)uval; hasPendingRange = true; }
+        } else if (bType == 0) { // Main
+            if (bTag == 10) { // Collection
+                collectionDepth++;
+                // Detect Mouse application collection (Usage Page 0x01, Usage 0x02)
+                if (!inMouseColl && usagePage == 0x01 &&
+                    ((pendingUsageCnt > 0 && (pendingUsages[0] == 0x02 || pendingUsages[0] == 0x01)))) {
+                    inMouseColl  = true;
+                    mouseCollDepth = collectionDepth;
+                }
+            } else if (bTag == 12) { // End Collection
+                if (inMouseColl && collectionDepth == mouseCollDepth) {
+                    inMouseColl  = false;
+                    mouseCollDepth = -1;
+                }
+                collectionDepth--;
+            } else if (bTag == 8) { // Input
+                uint8_t ridx = (reportId < 32) ? reportId : 0;
+                uint16_t &bitOff = bitOffsets[ridx];
+
+                bool isConstant = (uval & 0x01) != 0;
+                if (inMouseColl && !isConstant) {
+                    if (usagePage == 0x09) {
+                        // Button page — record start bit and accumulate count
+                        if (buttonCnt == 0) { buttonBitOff = bitOff; mouseReportId = reportId; }
+                        buttonCnt += reportCount;
+                    } else if (usagePage == 0x01) {
+                        // Generic Desktop axes
+                        for (uint8_t slot = 0; slot < reportCount; slot++) {
+                            uint8_t usage = 0;
+                            if (pendingUsageCnt > 0 && slot < pendingUsageCnt) {
+                                usage = pendingUsages[slot];
+                            } else if (hasPendingRange && pendingUsageMin + slot <= pendingUsageMax) {
+                                usage = pendingUsageMin + slot;
+                            }
+                            uint16_t fieldOff = bitOff + (uint16_t)slot * reportSize;
+                            if      (usage == 0x30) { xBitOff=fieldOff; xBits=reportSize; xMin=logMin; xMax=logMax; foundX=true; mouseReportId=reportId; }
+                            else if (usage == 0x31) { yBitOff=fieldOff; yBits=reportSize; yMin=logMin; yMax=logMax; foundY=true; }
+                            else if (usage == 0x38) { wBitOff=fieldOff; wBits=reportSize; hasWheel=true; }
+                        }
+                    }
+                }
+                bitOff += (uint16_t)reportSize * reportCount;
+            }
+            // Clear local state after any Main item
+            pendingUsageCnt = 0;
+            pendingUsageMin = pendingUsageMax = 0;
+            hasPendingRange = false;
+        }
+    }
+
+    if (!foundX || !foundY) return false;
+    out.valid          = true;
+    out.reportId       = mouseReportId;
+    out.buttonBitOffset = buttonBitOff;
+    out.buttonCount    = (buttonCnt > 8) ? 8 : buttonCnt;
+    out.xBitOffset     = xBitOff; out.xBitSize = xBits; out.xLogMin = xMin; out.xLogMax = xMax;
+    out.yBitOffset     = yBitOff; out.yBitSize = yBits; out.yLogMin = yMin; out.yLogMax = yMax;
+    out.wheelPresent   = hasWheel;
+    out.wheelBitOffset = wBitOff; out.wheelBitSize = wBits;
+    return true;
+}
+
 void MyEspUsbHostClass::init()
 {
     usb.setKeyboardLayout(ESP_USB_HOST_KEYBOARD_LAYOUT_DE_DE);
@@ -145,6 +284,7 @@ void MyEspUsbHostClass::init()
         MyEspUsbHost.lastMouseButton.description[0] = '\0';
         MyEspUsbHost.hidDesc.valid = false;
         MyEspUsbHost.hidDesc.length = 0;
+        MyEspUsbHost.mouseLayout = {};
     });
 
     usb.onHIDReportDescriptor([](const EspUsbHostHIDReportDescriptor& desc) {
@@ -153,8 +293,20 @@ void MyEspUsbHostClass::init()
         d.length = (desc.length <= sizeof(d.data)) ? desc.length : (uint16_t)sizeof(d.data);
         memcpy(d.data, desc.data, d.length);
         d.valid = true;
-        pmLogging.LogLn("[USB] HID descriptor: iface=" + String(desc.interfaceNumber) +
-                        " len=" + String(desc.length));
+
+        auto &ml = MyEspUsbHost.mouseLayout;
+        ml = {};  // reset before re-parsing
+        bool ok = parseHIDMouseLayout(d.data, d.length, ml);
+        if (ok) {
+            pmLogging.LogLn("[USB] Mouse layout: reportId=" + String(ml.reportId) +
+                            " buttons=" + String(ml.buttonCount) + "@bit" + String(ml.buttonBitOffset) +
+                            " X=" + String(ml.xBitSize) + "bit@" + String(ml.xBitOffset) +
+                            " Y=" + String(ml.yBitSize) + "bit@" + String(ml.yBitOffset) +
+                            (ml.wheelPresent ? " Wheel=" + String(ml.wheelBitSize) + "bit@" + String(ml.wheelBitOffset) : String(" noWheel")));
+        } else {
+            pmLogging.LogLn("[USB] HID descriptor: iface=" + String(desc.interfaceNumber) +
+                            " len=" + String(desc.length) + " (no mouse layout found, using library defaults)");
+        }
     });
 
     usb.onHIDInput([](const EspUsbHostHIDInput& input) {
@@ -216,39 +368,36 @@ void MyEspUsbHostClass::init()
         entry.libButtons = evt.buttons;
         MyEspUsbHost.mouseRawHead = (idx + 1) % MyEspUsbHostClass::MOUSE_RAW_LOG_SIZE;
 
-        // This mouse uses a 12-bit packed report (after the library strips the 0x02 report ID):
-        //   byte[0] = buttons
-        //   byte[1] = X[7:0]
-        //   byte[2] = Y[7:0]
-        //   byte[3] = Y[11:8] (low nibble) | X[11:8] (high nibble)
-        //   byte[4] = scroll wheel (8-bit)
-        //
-        // The library misreads byte[3] as the wheel field, which is actually the
-        // packed high nibbles of X and Y.  This would send wheel=15 to the PS/2 host
-        // on every Y=-1 movement.  Parse reportData directly instead.
-        uint8_t buttons         = evt.buttons & 0x07;
-        uint8_t previousButtons = evt.previousButtons & 0x07;
+        // Extract mouse axes and buttons using the layout parsed from the HID report descriptor.
+        // Falls back to the library-provided values if no layout was parsed.
+        static uint8_t prevButtons = 0;
 
-        int16_t x = evt.x;  // int8(rpt[1]) is correct for |X| <= 127
-        int16_t y = evt.y;  // int8(rpt[2]) is correct for |Y| <= 127
-        int8_t  wheel = 0;
+        int16_t x     = evt.x;
+        int16_t y     = evt.y;
+        int8_t  wheel = (int8_t)constrain(evt.wheel, -128, 127);
+        uint8_t buttons = evt.buttons & 0x07;
 
-        // Layout confirmed from HID report descriptor (report ID 0x02, after strip):
-        //   r[0]      = buttons 1-8  (bit0=left, bit1=right, bit2=middle)
-        //   r[1]      = buttons 9-16 (usually 0)
-        //   r[2]      = X[7:0]
-        //   r[3]      = X[11:8] (low nibble) | Y[3:0] (high nibble)
-        //   r[4]      = Y[11:4]
-        //   r[5]      = Wheel  (8-bit signed, ±127)
-        //   r[6]      = AC Pan (8-bit signed, horizontal scroll — ignored for PS/2)
-        if (evt.reportData && evt.reportLength >= 5) {
-            const uint8_t *r = (const uint8_t *)evt.reportData;
-            uint16_t xRaw = (uint16_t)r[2] | ((uint16_t)(r[3] & 0x0F) << 8);
-            uint16_t yRaw = (uint16_t)(r[3] >> 4) | ((uint16_t)r[4] << 4);
-            x = (xRaw & 0x800) ? (int16_t)(xRaw | 0xF000) : (int16_t)xRaw;
-            y = (yRaw & 0x800) ? (int16_t)(yRaw | 0xF000) : (int16_t)yRaw;
-            wheel = (evt.reportLength >= 6) ? (int8_t)r[5] : 0;
+        const auto &layout = MyEspUsbHost.mouseLayout;
+        if (layout.valid && evt.reportData && evt.reportLength > 0) {
+            const uint8_t *rpt   = (const uint8_t *)evt.reportData;
+            uint16_t       rptLen = (uint16_t)evt.reportLength;
+            // The EspUsbHost library strips the report-ID byte before handing us reportData,
+            // so our descriptor-derived bit offsets (which exclude the ID byte) are correct as-is.
+            x = (int16_t)extractBitsSigned(rpt, rptLen, layout.xBitOffset, layout.xBitSize);
+            y = (int16_t)extractBitsSigned(rpt, rptLen, layout.yBitOffset, layout.yBitSize);
+            if (layout.wheelPresent)
+                wheel = (int8_t)constrain(extractBitsSigned(rpt, rptLen, layout.wheelBitOffset, layout.wheelBitSize), -128, 127);
+            else
+                wheel = 0;
+            buttons = 0;
+            for (uint8_t b = 0; b < layout.buttonCount && b < 8; b++) {
+                if (extractBitsSigned(rpt, rptLen, layout.buttonBitOffset + b, 1) & 1)
+                    buttons |= (uint8_t)(1u << b);
+            }
         }
+
+        uint8_t previousButtons = prevButtons;
+        prevButtons = buttons;
 
         bool moved       = (x != 0 || y != 0 || wheel != 0);
         bool btnsChanged = (buttons != previousButtons);
