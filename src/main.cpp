@@ -131,14 +131,21 @@ void Task1code( void * parameter) {
 
     pmCommonLib.Setup();
     pmCommonLib.MQTTConnector.ConfigureDevice("PS2Adapter", "MK1", "Patrick Mortara");
+    MyEspUsbHost.LoadMouseSettings();
+    PS2Cmd mouseTimingCmd;
+    mouseTimingCmd.type = PS2CmdType::SET_MOUSE_TIMING;
+    mouseTimingCmd.mouseTiming.clockHalfMicros = MyEspUsbHost.mouseClockHalfMicros;
+    mouseTimingCmd.mouseTiming.byteIntervalMicros = MyEspUsbHost.mouseByteIntervalMicros;
+    ps2Enqueue(mouseTimingCmd);
     pmCommonLib.Start();
 
     // Register after Start() so pmCommonLib's specific routes (e.g. /config) are
     // registered first and win against the "/" prefix match in ESPAsyncWebServer.
     pmCommonLib.WebServer.RegisterOn("/reboot", handleReboot, HTTP_POST);
     pmCommonLib.WebServer.RegisterOn("/ps2/keyboard", handleKeyboardEvent, HTTP_POST);
-    pmCommonLib.WebServer.RegisterOn("/ps2/mouse", handleMouseEvent, HTTP_POST);
+    pmCommonLib.WebServer.RegisterOn("/ps2/mouse/settings", handleMouseSettings, HTTP_POST);
     pmCommonLib.WebServer.RegisterOn("/ps2/mouse/timing", handleMouseTiming, HTTP_POST);
+    pmCommonLib.WebServer.RegisterOn("/ps2/mouse", handleMouseEvent, HTTP_POST);
     pmCommonLib.WebServer.RegisterOn("/", handleRoot, HTTP_GET);
 
     

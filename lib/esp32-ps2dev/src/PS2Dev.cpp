@@ -194,9 +194,9 @@ PS2dev::BusState PS2dev::get_bus_state() {
 SemaphoreHandle_t PS2dev::get_bus_mutex_handle() { return _mutex_bus; }
 QueueHandle_t PS2dev::get_packet_queue_handle() { return _queue_packet; }
 
-int IRAM_ATTR PS2dev::send_packet_to_queue(const PS2Packet& packet) {
+int IRAM_ATTR PS2dev::send_packet_to_queue(const PS2Packet& packet, TickType_t ticks_to_wait) {
   auto packet_copy = new PS2Packet(packet);
-  if (xQueueSend(_queue_packet, &packet_copy, 0) == pdTRUE) {
+  if (xQueueSend(_queue_packet, &packet_copy, ticks_to_wait) == pdTRUE) {
     return 0;
   }
   delete packet_copy;

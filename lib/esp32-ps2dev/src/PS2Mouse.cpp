@@ -3,6 +3,7 @@
 namespace esp32_ps2dev {
 
 const uint32_t MOUSE_CLICK_PRESSING_DURATION_MILLIS = 100;
+const uint32_t MOUSE_BUTTON_REPORT_QUEUE_WAIT_MILLIS = 0;
 
 PS2Mouse::PS2Mouse(int clk, int data) : PS2dev(clk, data) {}
 void PS2Mouse::begin(bool restore_internal_state) {
@@ -280,7 +281,7 @@ void PS2Mouse::press(Button button) {
   button_4 = _button_4th;
   button_5 = _button_5th;
   taskEXIT_CRITICAL(&_mutex_counter);
-  send_report(0, 0, 0, left, right, middle, button_4, button_5);
+  send_button_report(0, 0, 0, left, right, middle, button_4, button_5);
 }
 
 void PS2Mouse::release(Button button) {
@@ -316,7 +317,7 @@ void PS2Mouse::release(Button button) {
   button_4 = _button_4th;
   button_5 = _button_5th;
   taskEXIT_CRITICAL(&_mutex_counter);
-  send_report(0, 0, 0, left, right, middle, button_4, button_5);
+  send_button_report(0, 0, 0, left, right, middle, button_4, button_5);
 }
 
 void PS2Mouse::click(Button button) {
@@ -456,6 +457,13 @@ void IRAM_ATTR PS2Mouse::send_report(int16_t x, int16_t y, int8_t wheel, bool le
   PS2Packet packet = make_packet(x, y, wheel, left, right, middle, button_4, button_5);
   if (_data_reporting_enabled) {
     send_packet_to_queue(packet);
+  }
+}
+
+void PS2Mouse::send_button_report(int16_t x, int16_t y, int8_t wheel, bool left, bool right, bool middle, bool button_4, bool button_5) {
+  PS2Packet packet = make_packet(x, y, wheel, left, right, middle, button_4, button_5);
+  if (_data_reporting_enabled) {
+    send_packet_to_queue(packet, pdMS_TO_TICKS(MOUSE_BUTTON_REPORT_QUEUE_WAIT_MILLIS));
   }
 }
 

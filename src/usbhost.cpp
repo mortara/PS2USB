@@ -2,6 +2,13 @@
 #include "ps2devices.h"
 #include "pmCommonLib.hpp"
 
+static int32_t mouseScaledXCarry = 0;
+static int32_t mouseScaledYCarry = 0;
+static const uint16_t DEFAULT_MOUSE_SPEED_PERCENT = 75;
+static const uint16_t MIN_MOUSE_SPEED_PERCENT = 25;
+static const uint16_t MAX_MOUSE_SPEED_PERCENT = 200;
+static const char *MOUSE_SETTINGS_CONFIG_FILE = "/mouse_settings.txt";
+
 esp32_ps2dev::scancodes::Key USBKeyCodeToPS2ScanCode(uint8_t keycode)
 {
     switch (keycode)
@@ -162,6 +169,179 @@ static bool selectMouseReportPayload(const EspUsbHostMouseEvent &evt,
     return useReportData();
 }
 
+static bool looksLikeReportIdMousePacket(const uint8_t *data, uint16_t len, uint8_t parsedButtons) {
+    if (!data || len < 5) return false;
+
+    // Some boot-protocol mice still include a report ID. EspUsbHost's boot parser
+    // then treats byte 0 as the button mask, so the real button byte at byte 1 is
+    // hidden behind a constant "button 2 pressed" value.
+    if (data[0] == parsedButtons && data[0] >= 1 && data[0] <= 15) return true;
+
+    return false;
+}
+
+static bool extractReportIdPacketButtons(const EspUsbHostMouseEvent &evt, uint8_t &buttons) {
+    if (evt.rawData && looksLikeReportIdMousePacket((const uint8_t *)evt.rawData,
+                                                    (uint16_t)evt.rawLength,
+                                                    evt.buttons)) {
+        buttons = ((const uint8_t *)evt.rawData)[1] & 0x07;
+        return true;
+    }
+
+    if (evt.reportData && looksLikeReportIdMousePacket((const uint8_t *)evt.reportData,
+                                                       (uint16_t)evt.reportLength,
+                                                       evt.buttons)) {
+        buttons = ((const uint8_t *)evt.reportData)[1] & 0x07;
+        return true;
+    }
+
+    return false;
+}
+
+static bool decodeReportIdMousePacket(const uint8_t *data,
+                                      uint16_t len,
+                                      int16_t &x,
+                                      int16_t &y,
+                                      int8_t &wheel,
+                                      uint8_t &buttons) {
+    if (!looksLikeReportIdMousePacket(data, len, data ? data[0] : 0)) return false;
+
+    const auto &layout = MyEspUsbHost.mouseLayout;
+    const uint8_t *payload = data + 1;
+    uint16_t payloadLen = len - 1;
+
+    buttons = data[1] & 0x07;
+    x = (payloadLen > 2) ? (int8_t)payload[2] : 0;
+    y = (payloadLen > 3) ? (int8_t)payload[3] : 0;
+    wheel = (payloadLen > 4) ? (int8_t)payload[4] : 0;
+
+    if (layout.valid && layout.reportId == data[0]) {
+        x = (int16_t)extractBitsSigned(payload, payloadLen, layout.xBitOffset, layout.xBitSize);
+        y = (int16_t)extractBitsSigned(payload, payloadLen, layout.yBitOffset, layout.yBitSize);
+        if (layout.wheelPresent)
+            wheel = (int8_t)constrain(extractBitsSigned(payload, payloadLen, layout.wheelBitOffset, layout.wheelBitSize), -128, 127);
+        else
+            wheel = 0;
+
+        buttons = 0;
+        for (uint8_t b = 0; b < layout.buttonCount && b < 8; b++) {
+            if (extractBitsSigned(payload, payloadLen, layout.buttonBitOffset + b, 1) & 1)
+                buttons |= (uint8_t)(1u << b);
+        }
+        buttons &= 0x07;
+    }
+
+    return true;
+}
+
+static void storeMouseRawReport(const uint8_t *rawData,
+                                size_t rawLength,
+                                const uint8_t *reportData,
+                                size_t reportLength,
+                                int16_t libX,
+                                int16_t libY,
+                                int8_t libWheel,
+                                uint8_t libButtons,
+                                uint8_t decodedButtons) {
+    uint8_t idx = MyEspUsbHost.mouseRawHead;
+    auto &entry = MyEspUsbHost.mouseRawLog[idx];
+    entry.time       = millis();
+    entry.rawLen     = (uint8_t)min(rawLength,  (size_t)MyEspUsbHostClass::MOUSE_RAW_MAX_BYTES);
+    entry.rptLen     = (uint8_t)min(reportLength,(size_t)MyEspUsbHostClass::MOUSE_RAW_MAX_BYTES);
+    if (rawData && entry.rawLen) memcpy(entry.rawData, rawData, entry.rawLen);
+    if (reportData && entry.rptLen) memcpy(entry.rptData, reportData, entry.rptLen);
+    entry.libX       = libX;
+    entry.libY       = libY;
+    entry.libWheel   = libWheel;
+    entry.libButtons = libButtons;
+    entry.decodedButtons = decodedButtons;
+    MyEspUsbHost.mouseRawHead = (idx + 1) % MyEspUsbHostClass::MOUSE_RAW_LOG_SIZE;
+}
+
+static void handleDecodedMouseButtons(uint8_t previousButtons, uint8_t buttons) {
+    buttons &= 0x07;
+    previousButtons &= 0x07;
+    if (buttons == previousButtons) return;
+
+    uint8_t changed = buttons ^ previousButtons;
+    if (changed & 0x01) {
+        if (buttons & 0x01) {
+            pmLogging.LogLn("Mouse LEFT pressed");
+            MyEspUsbHost.RecordMouseButtonEvent("Left", "pressed");
+            PS2Devices.PressMouseButton(esp32_ps2dev::PS2Mouse::Button::LEFT);
+        } else {
+            pmLogging.LogLn("Mouse LEFT released");
+            MyEspUsbHost.RecordMouseButtonEvent("Left", "released");
+            MyEspUsbHost.RecordMouseClick(0);
+            PS2Devices.ReleaseMouseButton(esp32_ps2dev::PS2Mouse::Button::LEFT);
+        }
+    }
+    if (changed & 0x02) {
+        if (buttons & 0x02) {
+            pmLogging.LogLn("Mouse RIGHT pressed");
+            MyEspUsbHost.RecordMouseButtonEvent("Right", "pressed");
+            PS2Devices.PressMouseButton(esp32_ps2dev::PS2Mouse::Button::RIGHT);
+        } else {
+            pmLogging.LogLn("Mouse RIGHT released");
+            MyEspUsbHost.RecordMouseButtonEvent("Right", "released");
+            MyEspUsbHost.RecordMouseClick(1);
+            PS2Devices.ReleaseMouseButton(esp32_ps2dev::PS2Mouse::Button::RIGHT);
+        }
+    }
+    if (changed & 0x04) {
+        if (buttons & 0x04) {
+            pmLogging.LogLn("Mouse MIDDLE pressed");
+            MyEspUsbHost.RecordMouseButtonEvent("Middle", "pressed");
+            PS2Devices.PressMouseButton(esp32_ps2dev::PS2Mouse::Button::MIDDLE);
+        } else {
+            pmLogging.LogLn("Mouse MIDDLE released");
+            MyEspUsbHost.RecordMouseButtonEvent("Middle", "released");
+            MyEspUsbHost.RecordMouseClick(2);
+            PS2Devices.ReleaseMouseButton(esp32_ps2dev::PS2Mouse::Button::MIDDLE);
+        }
+    }
+}
+
+static void handleDecodedMouseMove(int16_t x, int16_t y, int8_t wheel) {
+    if (x == 0 && y == 0 && wheel == 0) return;
+    if (millis() < MyEspUsbHost.ignoreMouseMoveUntil) return;
+
+    uint16_t speedPercent = MyEspUsbHost.GetMouseSpeedPercent();
+    mouseScaledXCarry += (int32_t)x * speedPercent;
+    mouseScaledYCarry += (int32_t)y * speedPercent;
+    int16_t scaledX = (int16_t)(mouseScaledXCarry / 100);
+    int16_t scaledY = (int16_t)(mouseScaledYCarry / 100);
+    mouseScaledXCarry -= (int32_t)scaledX * 100;
+    mouseScaledYCarry -= (int32_t)scaledY * 100;
+
+    // Clamp to ±127 before handing to the PS/2 library.
+    // The PS/2 protocol sets overflow bits when |value| > 255, and many
+    // retro PS/2 host drivers react to overflow with wild cursor jumps or
+    // a mouse reset. ±127 also matches what the old boot-protocol int8_t
+    // gave us, and survives the PS/2 host's optional 2:1 scale mode
+    // (127 × 2 = 254, safely below the 255 overflow threshold).
+    auto clamp7 = [](int16_t v) -> int16_t {
+        return v > 127 ? 127 : (v < -127 ? -127 : v);
+    };
+    int16_t ps2X = clamp7(scaledX);
+    int16_t ps2Y = clamp7((int16_t)-scaledY);
+    if (ps2X != 0 || ps2Y != 0 || wheel != 0) {
+        PS2Devices.MoveMouse(ps2X, ps2Y, wheel);
+    }
+    MyEspUsbHost.lastMouseMove.time = millis();
+    MyEspUsbHost.lastMouseMove.x = x;
+    MyEspUsbHost.lastMouseMove.y = y;
+    MyEspUsbHost.lastMouseMove.wheel = wheel;
+    MyEspUsbHost.lastMouseMove.ps2X = ps2X;
+    MyEspUsbHost.lastMouseMove.ps2Y = ps2Y;
+    MyEspUsbHost.lastMouseMove.totalX += x;
+    MyEspUsbHost.lastMouseMove.totalY += y;
+    MyEspUsbHost.lastMouseMove.totalPs2X += ps2X;
+    MyEspUsbHost.lastMouseMove.totalPs2Y += ps2Y;
+    MyEspUsbHost.lastMouseMove.totalWheel += wheel;
+    MyEspUsbHost.lastMouseMove.totalMoves++;
+}
+
 // Walk a raw HID report descriptor and extract the mouse report layout.
 // Returns true if X and Y axes were found.
 static bool parseHIDMouseLayout(const uint8_t *desc, uint16_t len,
@@ -299,7 +479,7 @@ static bool parseHIDMouseLayout(const uint8_t *desc, uint16_t len,
     return true;
 }
 
-static const unsigned long DOUBLE_CLICK_WINDOW_MS = 500;
+static const unsigned long DOUBLE_CLICK_WINDOW_MS = 800;
 
 static const char *mouseButtonName(uint8_t buttonIndex) {
     switch (buttonIndex) {
@@ -327,6 +507,9 @@ void MyEspUsbHostClass::RecordMouseClick(uint8_t buttonIndex)
     lastMouseButton.totalClicks++;
     lastMouseButton.lastClickTime = now;
     lastMouseButton.lastClickButton = buttonIndex;
+    lastMouseButton.lastClickIntervalMs = (previousClickTime != 0 && previousButton == buttonIndex)
+        ? now - previousClickTime
+        : 0;
 
     if (previousClickTime != 0 &&
         previousButton == buttonIndex &&
@@ -347,6 +530,62 @@ void MyEspUsbHostClass::RecordMouseDoubleClick(uint8_t buttonIndex, unsigned lon
     snprintf(lastMouseButton.doubleClickDescription,
              sizeof(lastMouseButton.doubleClickDescription),
              "%s double-click", mouseButtonName(buttonIndex));
+}
+
+void MyEspUsbHostClass::LoadMouseSettings()
+{
+    JsonDocument doc = pmCommonLib.ConfigHandler.LoadConfigFile(MOUSE_SETTINGS_CONFIG_FILE);
+
+    mouseSpeedPercent = (uint16_t)(doc["speedPercent"] | DEFAULT_MOUSE_SPEED_PERCENT);
+    mouseClockHalfMicros = (uint16_t)(doc["clockHalfMicros"] | PS2Devices.GetMouseClockHalfPeriodMicros());
+    mouseByteIntervalMicros = (uint16_t)(doc["byteIntervalMicros"] | PS2Devices.GetMouseByteIntervalMicros());
+
+    if (mouseSpeedPercent < MIN_MOUSE_SPEED_PERCENT) mouseSpeedPercent = MIN_MOUSE_SPEED_PERCENT;
+    if (mouseSpeedPercent > MAX_MOUSE_SPEED_PERCENT) mouseSpeedPercent = MAX_MOUSE_SPEED_PERCENT;
+    if (mouseClockHalfMicros < 30 || mouseClockHalfMicros > 80) mouseClockHalfMicros = PS2Devices.GetMouseClockHalfPeriodMicros();
+    if (mouseByteIntervalMicros < 50 || mouseByteIntervalMicros > 2000) mouseByteIntervalMicros = PS2Devices.GetMouseByteIntervalMicros();
+
+    mouseScaledXCarry = 0;
+    mouseScaledYCarry = 0;
+    PS2Devices.SetMouseTiming(mouseClockHalfMicros, mouseByteIntervalMicros);
+    pmLogging.LogLn("[USB] Mouse settings loaded: speed=" + String(mouseSpeedPercent) +
+                    "% clockHalf=" + String(mouseClockHalfMicros) +
+                    "us byteInterval=" + String(mouseByteIntervalMicros) + "us");
+}
+
+bool MyEspUsbHostClass::SaveMouseSettings()
+{
+    JsonDocument data;
+    data["speedPercent"] = mouseSpeedPercent;
+    data["clockHalfMicros"] = mouseClockHalfMicros;
+    data["byteIntervalMicros"] = mouseByteIntervalMicros;
+
+    if (pmCommonLib.ConfigHandler.SaveConfigFile(MOUSE_SETTINGS_CONFIG_FILE, data)) {
+        pmLogging.LogLn("[USB] Mouse settings saved: speed=" + String(mouseSpeedPercent) +
+                        "% clockHalf=" + String(mouseClockHalfMicros) +
+                        "us byteInterval=" + String(mouseByteIntervalMicros) + "us");
+        return true;
+    } else {
+        pmLogging.LogLn("[USB] Mouse settings save failed");
+        return false;
+    }
+}
+
+void MyEspUsbHostClass::SetMouseSpeedPercent(uint16_t speedPercent)
+{
+    if (speedPercent < MIN_MOUSE_SPEED_PERCENT) speedPercent = MIN_MOUSE_SPEED_PERCENT;
+    if (speedPercent > MAX_MOUSE_SPEED_PERCENT) speedPercent = MAX_MOUSE_SPEED_PERCENT;
+    mouseSpeedPercent = speedPercent;
+    mouseScaledXCarry = 0;
+    mouseScaledYCarry = 0;
+}
+
+uint16_t MyEspUsbHostClass::GetMouseSpeedPercent()
+{
+    uint16_t speedPercent = mouseSpeedPercent;
+    if (speedPercent < MIN_MOUSE_SPEED_PERCENT) return MIN_MOUSE_SPEED_PERCENT;
+    if (speedPercent > MAX_MOUSE_SPEED_PERCENT) return MAX_MOUSE_SPEED_PERCENT;
+    return speedPercent;
 }
 
 void MyEspUsbHostClass::init()
@@ -431,6 +670,38 @@ void MyEspUsbHostClass::init()
             MyEspUsbHost.hidDesc.subClass = input.subclass;
             MyEspUsbHost.hidDesc.protocol = input.protocol;
         }
+
+        if (looksLikeReportIdMousePacket((const uint8_t *)input.data,
+                                         (uint16_t)input.length,
+                                         input.data ? input.data[0] : 0)) {
+            static uint8_t prevReportIdButtons = 0;
+            uint8_t buttons = 0;
+            int16_t x = 0;
+            int16_t y = 0;
+            int8_t wheel = 0;
+            if (!decodeReportIdMousePacket((const uint8_t *)input.data,
+                                           (uint16_t)input.length,
+                                           x,
+                                           y,
+                                           wheel,
+                                           buttons)) {
+                return;
+            }
+
+            storeMouseRawReport((const uint8_t *)input.data,
+                                input.length,
+                                (const uint8_t *)input.data,
+                                input.length,
+                                x,
+                                y,
+                                wheel,
+                                input.data[0],
+                                buttons);
+
+            handleDecodedMouseMove(x, y, wheel);
+            handleDecodedMouseButtons(prevReportIdButtons, buttons);
+            prevReportIdButtons = buttons;
+        }
     });
 
     usb.onKeyboard([](const EspUsbHostKeyboardEvent& evt) {
@@ -470,20 +741,6 @@ void MyEspUsbHostClass::init()
     });
 
     usb.onMouse([](const EspUsbHostMouseEvent& evt) {
-        // Store in ring buffer for the web diagnostic view.
-        uint8_t idx = MyEspUsbHost.mouseRawHead;
-        auto &entry = MyEspUsbHost.mouseRawLog[idx];
-        entry.time       = millis();
-        entry.rawLen     = (uint8_t)min(evt.rawLength,  (size_t)MyEspUsbHostClass::MOUSE_RAW_MAX_BYTES);
-        entry.rptLen     = (uint8_t)min(evt.reportLength,(size_t)MyEspUsbHostClass::MOUSE_RAW_MAX_BYTES);
-        if (evt.rawData)    memcpy(entry.rawData, evt.rawData,    entry.rawLen);
-        if (evt.reportData) memcpy(entry.rptData, evt.reportData, entry.rptLen);
-        entry.libX       = evt.x;
-        entry.libY       = evt.y;
-        entry.libWheel   = (int8_t)constrain(evt.wheel, -128, 127);
-        entry.libButtons = evt.buttons;
-        MyEspUsbHost.mouseRawHead = (idx + 1) % MyEspUsbHostClass::MOUSE_RAW_LOG_SIZE;
-
         // Extract mouse axes and buttons using the layout parsed from the HID report descriptor.
         // Falls back to the library-provided values if no layout was parsed.
         static uint8_t prevButtons = 0;
@@ -492,6 +749,13 @@ void MyEspUsbHostClass::init()
         int16_t y     = evt.y;
         int8_t  wheel = (int8_t)constrain(evt.wheel, -128, 127);
         uint8_t buttons = evt.buttons & 0x07;
+
+        uint8_t reportIdPacketButtons = 0;
+        bool hasReportIdPacketButtons = extractReportIdPacketButtons(evt, reportIdPacketButtons);
+        bool reportHandledByHidInput = hasReportIdPacketButtons;
+        if (hasReportIdPacketButtons) {
+            buttons = reportIdPacketButtons;
+        }
 
         const auto &layout = MyEspUsbHost.mouseLayout;
         if (layout.valid) {
@@ -504,94 +768,50 @@ void MyEspUsbHostClass::init()
                     wheel = (int8_t)constrain(extractBitsSigned(rpt, rptLen, layout.wheelBitOffset, layout.wheelBitSize), -128, 127);
                 else
                     wheel = 0;
-                buttons = 0;
-                for (uint8_t b = 0; b < layout.buttonCount && b < 8; b++) {
-                    if (extractBitsSigned(rpt, rptLen, layout.buttonBitOffset + b, 1) & 1)
-                        buttons |= (uint8_t)(1u << b);
+                if (!hasReportIdPacketButtons) {
+                    buttons = 0;
+                    for (uint8_t b = 0; b < layout.buttonCount && b < 8; b++) {
+                        if (extractBitsSigned(rpt, rptLen, layout.buttonBitOffset + b, 1) & 1)
+                            buttons |= (uint8_t)(1u << b);
+                    }
                 }
             }
+        } else if (hasReportIdPacketButtons) {
+            buttons = reportIdPacketButtons;
+        }
+        if (hasReportIdPacketButtons) {
+            buttons = reportIdPacketButtons;
         }
 
         // Mask to the 3 buttons PS/2 actually models before change detection.
         // Extra buttons (bits 3+) from high-button mice must not create spurious
         // press/release events or corrupt prevButtons state.
         buttons &= 0x07;
+
+        if (!reportHandledByHidInput) {
+            storeMouseRawReport((const uint8_t *)evt.rawData,
+                                evt.rawLength,
+                                (const uint8_t *)evt.reportData,
+                                evt.reportLength,
+                                evt.x,
+                                evt.y,
+                                (int8_t)constrain(evt.wheel, -128, 127),
+                                evt.buttons,
+                                buttons);
+        }
+
         uint8_t previousButtons = prevButtons;
         prevButtons = buttons;
 
         bool moved       = (x != 0 || y != 0 || wheel != 0);
         bool btnsChanged = (buttons != previousButtons);
 
-        if (moved && millis() < MyEspUsbHost.ignoreMouseMoveUntil) {
-            moved = false;
+        if (moved && !reportHandledByHidInput) {
+            handleDecodedMouseMove(x, y, wheel);
         }
 
-        if (moved) {
-            // Clamp to ±127 before handing to the PS/2 library.
-            // The PS/2 protocol sets overflow bits when |value| > 255, and many
-            // retro PS/2 host drivers react to overflow with wild cursor jumps or
-            // a mouse reset. ±127 also matches what the old boot-protocol int8_t
-            // gave us, and survives the PS/2 host's optional 2:1 scale mode
-            // (127 × 2 = 254, safely below the 255 overflow threshold).
-            auto clamp7 = [](int16_t v) -> int16_t {
-                return v > 127 ? 127 : (v < -127 ? -127 : v);
-            };
-            int16_t ps2X = clamp7(x);
-            int16_t ps2Y = clamp7((int16_t)-y);
-            PS2Devices.MoveMouse(ps2X, ps2Y, wheel);
-            MyEspUsbHost.lastMouseMove.time = millis();
-            MyEspUsbHost.lastMouseMove.x = x;
-            MyEspUsbHost.lastMouseMove.y = y;
-            MyEspUsbHost.lastMouseMove.wheel = wheel;
-            MyEspUsbHost.lastMouseMove.ps2X = ps2X;
-            MyEspUsbHost.lastMouseMove.ps2Y = ps2Y;
-            MyEspUsbHost.lastMouseMove.totalX += x;
-            MyEspUsbHost.lastMouseMove.totalY += y;
-            MyEspUsbHost.lastMouseMove.totalPs2X += ps2X;
-            MyEspUsbHost.lastMouseMove.totalPs2Y += ps2Y;
-            MyEspUsbHost.lastMouseMove.totalWheel += wheel;
-            MyEspUsbHost.lastMouseMove.totalMoves++;
-        }
-
-        if (btnsChanged) {
-            uint8_t changed = buttons ^ previousButtons;
-
-            if (changed & 0x01) {
-                if (buttons & 0x01) {
-                    pmLogging.LogLn("Mouse LEFT pressed");
-                    PS2Devices.PressMouseButton(esp32_ps2dev::PS2Mouse::Button::LEFT);
-                    MyEspUsbHost.RecordMouseButtonEvent("Left", "pressed");
-                } else {
-                    pmLogging.LogLn("Mouse LEFT released");
-                    PS2Devices.ReleaseMouseButton(esp32_ps2dev::PS2Mouse::Button::LEFT);
-                    MyEspUsbHost.RecordMouseButtonEvent("Left", "released");
-                    MyEspUsbHost.RecordMouseClick(0);
-                }
-            }
-            if (changed & 0x02) {
-                if (buttons & 0x02) {
-                    pmLogging.LogLn("Mouse RIGHT pressed");
-                    PS2Devices.PressMouseButton(esp32_ps2dev::PS2Mouse::Button::RIGHT);
-                    MyEspUsbHost.RecordMouseButtonEvent("Right", "pressed");
-                } else {
-                    pmLogging.LogLn("Mouse RIGHT released");
-                    PS2Devices.ReleaseMouseButton(esp32_ps2dev::PS2Mouse::Button::RIGHT);
-                    MyEspUsbHost.RecordMouseButtonEvent("Right", "released");
-                    MyEspUsbHost.RecordMouseClick(1);
-                }
-            }
-            if (changed & 0x04) {
-                if (buttons & 0x04) {
-                    pmLogging.LogLn("Mouse MIDDLE pressed");
-                    PS2Devices.PressMouseButton(esp32_ps2dev::PS2Mouse::Button::MIDDLE);
-                    MyEspUsbHost.RecordMouseButtonEvent("Middle", "pressed");
-                } else {
-                    pmLogging.LogLn("Mouse MIDDLE released");
-                    PS2Devices.ReleaseMouseButton(esp32_ps2dev::PS2Mouse::Button::MIDDLE);
-                    MyEspUsbHost.RecordMouseButtonEvent("Middle", "released");
-                    MyEspUsbHost.RecordMouseClick(2);
-                }
-            }
+        if (btnsChanged && !reportHandledByHidInput) {
+            handleDecodedMouseButtons(previousButtons, buttons);
         }
     });
 

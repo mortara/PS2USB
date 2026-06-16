@@ -65,6 +65,7 @@ public:
         int16_t libY = 0;
         int8_t  libWheel = 0;
         uint8_t libButtons = 0;
+        uint8_t decodedButtons = 0;
     };
     MouseRawReport mouseRawLog[MOUSE_RAW_LOG_SIZE];
     volatile uint8_t mouseRawHead = 0;  // next write index (ring buffer)
@@ -80,6 +81,9 @@ public:
     } hidDesc;
 
     volatile unsigned long ignoreMouseMoveUntil = 0;
+    volatile uint16_t mouseSpeedPercent = 75;
+    volatile uint16_t mouseClockHalfMicros = 50;
+    volatile uint16_t mouseByteIntervalMicros = 500;
 
     // Parsed mouse report layout derived from the HID descriptor.
     // Bit offsets are relative to the report payload (after the library strips the report-ID byte).
@@ -107,6 +111,10 @@ public:
 
     void init();
     void DisplayInfo();
+    void LoadMouseSettings();
+    bool SaveMouseSettings();
+    void SetMouseSpeedPercent(uint16_t speedPercent);
+    uint16_t GetMouseSpeedPercent();
     void RecordMouseButtonEvent(const char *label, const char *action);
     void RecordMouseClick(uint8_t buttonIndex);
     void RecordMouseDoubleClick(uint8_t buttonIndex, unsigned long intervalMs);

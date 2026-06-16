@@ -208,9 +208,15 @@ void handleMouseEvent(AsyncWebServerRequest *request) {
     request->send(400, "text/plain", "Unsupported mouse event");
 }
 
-void handleMouseTiming(AsyncWebServerRequest *request) {
+void handleMouseSettings(AsyncWebServerRequest *request) {
     uint16_t clockHalf = (uint16_t)postInt(request, "clockHalf", PS2Devices.GetMouseClockHalfPeriodMicros(), 30, 80);
     uint16_t byteInterval = (uint16_t)postInt(request, "byteInterval", PS2Devices.GetMouseByteIntervalMicros(), 50, 2000);
+    uint16_t speedPercent = (uint16_t)postInt(request, "speedPercent", MyEspUsbHost.GetMouseSpeedPercent(), 25, 200);
+
+    MyEspUsbHost.mouseClockHalfMicros = clockHalf;
+    MyEspUsbHost.mouseByteIntervalMicros = byteInterval;
+    MyEspUsbHost.SetMouseSpeedPercent(speedPercent);
+    bool saved = MyEspUsbHost.SaveMouseSettings();
 
     PS2Cmd cmd;
     cmd.type = PS2CmdType::SET_MOUSE_TIMING;
@@ -218,9 +224,18 @@ void handleMouseTiming(AsyncWebServerRequest *request) {
     cmd.mouseTiming.byteIntervalMicros = byteInterval;
     ps2Enqueue(cmd);
 
-    pmLogging.LogLn("[WEB] Mouse timing clockHalf=" + String(clockHalf) +
+    pmLogging.LogLn("[WEB] Mouse settings speed=" + String(speedPercent) +
+                    "% clockHalf=" + String(clockHalf) +
                     "us byteInterval=" + String(byteInterval) + "us");
+    if (!saved) {
+        request->send(500, "text/plain", "Mouse settings could not be saved");
+        return;
+    }
     request->redirect("/");
+}
+
+void handleMouseTiming(AsyncWebServerRequest *request) {
+    handleMouseSettings(request);
 }
 
 void handleRoot(AsyncWebServerRequest *request) {
@@ -254,41 +269,48 @@ void handleRoot(AsyncWebServerRequest *request) {
         "<meta name='viewport' content='width=device-width, initial-scale=1'/>"
         "<title>ESP32 PS/2 Adapter</title>"
         "<style>"
-        "body{background:#cccccc;font-family:Arial,Helvetica,Sans-Serif;color:#000088;margin:16px}"
-        "h1{margin-bottom:4px}h2{margin:16px 0 6px}"
-        "table{border-collapse:collapse;margin:4px 0}"
-        "th,td{border:1px solid #000088;padding:4px 12px;text-align:left}"
-        "th{background:#000088;color:#fff}"
-        ".none{color:#880000}"
-        ".ok{color:#006600;font-weight:bold}"
-        ".hot{color:#cc5500;font-weight:bold}"
-        ".dim{color:#666;font-size:0.9em}"
-        ".card{background:#bbb;border:1px solid #999;border-radius:4px;padding:8px 14px;margin:6px 0;display:inline-block;min-width:260px;vertical-align:top}"
-        ".wide{min-width:340px;max-width:720px}"
-        ".controls{display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin:8px 0}"
-        "label{display:inline-block;font-size:0.9em;color:#333}"
-        "input,select,textarea{box-sizing:border-box;border:1px solid #888;border-radius:3px;padding:4px;font:inherit}"
+        ":root{--bg:#eef1f4;--panel:#fff;--line:#ccd4dd;--text:#1d2733;--muted:#667487;--accent:#184c9f;--accent2:#0b6f57;--danger:#9b1c1c}"
+        "*{box-sizing:border-box}"
+        "body{background:var(--bg);font-family:Arial,Helvetica,Sans-Serif;color:var(--text);margin:0;padding:18px;line-height:1.35}"
+        "body{max-width:1120px;margin-left:auto;margin-right:auto}"
+        "h1{font-size:1.55rem;margin:0 0 6px;color:#10233f}"
+        "h2{font-size:1.05rem;margin:22px 0 8px;color:#26384d;border-bottom:1px solid var(--line);padding-bottom:4px}"
+        ".topbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 14px;color:var(--muted)}"
+        ".card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px 14px;margin:8px 10px 8px 0;display:inline-block;min-width:280px;vertical-align:top;box-shadow:0 1px 2px rgba(20,30,45,.06)}"
+        ".wide{min-width:min(100%,420px);max-width:760px}"
+        ".controls{display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin:10px 0}"
+        "label{display:inline-block;font-size:.9rem;color:#344255;font-weight:bold}"
+        "input,select,textarea{box-sizing:border-box;border:1px solid #aeb8c4;border-radius:5px;padding:6px 7px;font:inherit;background:#fff;color:var(--text)}"
         "textarea{width:100%;max-width:680px}"
-        "input.num{width:74px}"
-        "button{background:#000088;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:1em}"
-        "button:hover{background:#1111aa}"
-        "a{color:#000088}"
-        "button.reboot{background:#880000;color:#fff;border:none;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:1em}"
-        "button.reboot:hover{background:#aa0000}"
+        "input.num{width:86px}"
+        "button{background:var(--accent);color:#fff;border:none;padding:7px 13px;border-radius:5px;cursor:pointer;font-size:1rem}"
+        "button:hover{background:#123d81}"
+        "button.reboot{background:var(--danger)}"
+        "button.reboot:hover{background:#7f1717}"
+        "table{border-collapse:collapse;margin:8px 0;background:#fff;box-shadow:0 1px 2px rgba(20,30,45,.04)}"
+        "th,td{border:1px solid var(--line);padding:6px 10px;text-align:left;white-space:nowrap}"
+        "th{background:#dbe6f5;color:#10233f;font-weight:bold}"
+        ".none{color:var(--danger);font-weight:bold}"
+        ".ok{color:var(--accent2);font-weight:bold}"
+        ".hot{color:#b45a00;font-weight:bold}"
+        ".dim{color:var(--muted);font-size:.9rem;font-weight:normal}"
+        "a{color:var(--accent)}"
+        "#rawlog{overflow-x:auto;padding-bottom:4px}"
+        "@media(max-width:720px){body{padding:12px}.card{display:block;min-width:0;margin-right:0}.wide{min-width:0}table{font-size:.88rem}h1{font-size:1.3rem}}"
         "</style>"
         "</head><body>";
 
     html += "<h1>ESP32 PS/2 Adapter &mdash; " + String(WiFi.getHostname()) + "</h1>";
-    html += "<p>Uptime: " + String(hr) + "h " + String(min % 60) + "m " + String(sec % 60) + "s"
-            " &nbsp;|&nbsp; <a href='/config/'>Config</a>"
-            " &nbsp;|&nbsp; <form style='display:inline' method='POST' action='/reboot'"
+    html += "<div class='topbar'><span>Uptime: " + String(hr) + "h " + String(min % 60) + "m " + String(sec % 60) + "s</span>"
+            "<a href='/config/'>Config</a>"
+            "<form style='display:inline' method='POST' action='/reboot'"
             " onsubmit=\"return confirm('Reboot device?')\">"
-            "<button class='reboot' type='submit'>Reboot</button></form></p>";
+            "<button class='reboot' type='submit'>Reboot</button></form></div>";
 
     // ── Device info ──────────────────────────────────────────────────────────
     html += "<h2>USB Device</h2>";
     if (!anyConnected) {
-        html += "<p class='none'>No USB device connected</p>";
+        html += "<div class='card'><span class='none'>No USB device connected</span></div>";
     } else {
         html += "<div class='card'>";
 
@@ -398,6 +420,22 @@ void handleRoot(AsyncWebServerRequest *request) {
             "<button type='submit'>Send Button</button>"
             "</form></div>";
 
+    html += "<h2>Mouse Settings</h2>";
+    html += "<div class='card wide'><b>PS/2 Mouse Calibration</b><br>";
+    html += "<span class='dim'>Current speed: " + String(MyEspUsbHost.GetMouseSpeedPercent()) +
+            "% &nbsp; clock half: " + String(PS2Devices.GetMouseClockHalfPeriodMicros()) +
+            " us &nbsp; byte gap: " + String(PS2Devices.GetMouseByteIntervalMicros()) + " us</span><br>";
+    html += "<form class='controls' method='POST' action='/ps2/mouse/settings'>"
+            "<label>Speed %<br><input class='num' type='number' name='speedPercent' min='25' max='200' value='" +
+            String(MyEspUsbHost.GetMouseSpeedPercent()) + "'></label>"
+            "<label>Clock half us<br><input class='num' type='number' name='clockHalf' min='30' max='80' value='" +
+            String(PS2Devices.GetMouseClockHalfPeriodMicros()) + "'></label>"
+            "<label>Byte gap us<br><input class='num' type='number' name='byteInterval' min='50' max='2000' value='" +
+            String(PS2Devices.GetMouseByteIntervalMicros()) + "'></label>"
+            "<button type='submit'>Save</button>"
+            "</form>"
+            "</div>";
+
     // Activity
     if (anyConnected) {
         html += "<h2>Activity</h2>";
@@ -432,13 +470,7 @@ void handleRoot(AsyncWebServerRequest *request) {
                                              (PS2Devices.GetMouseModeCode() == 1 ? "stream" : "wrap"));
             html += " &nbsp; reporting: " + String(PS2Devices.IsMouseDataReportingEnabled() ? "on" : "off") +
                     "</span><br>";
-            html += "<form class='controls' method='POST' action='/ps2/mouse/timing'>"
-                    "<label>Clock half us<br><input class='num' type='number' name='clockHalf' min='30' max='80' value='" +
-                    String(PS2Devices.GetMouseClockHalfPeriodMicros()) + "'></label>"
-                    "<label>Byte gap us<br><input class='num' type='number' name='byteInterval' min='50' max='2000' value='" +
-                    String(PS2Devices.GetMouseByteIntervalMicros()) + "'></label>"
-                    "<button type='submit'>Apply</button>"
-                    "</form>";
+            html += "<span class='dim'>Adapter speed: " + String(MyEspUsbHost.GetMouseSpeedPercent()) + "%</span><br>";
 
             // Movement
             if (MyEspUsbHost.lastMouseMove.time == 0) {
@@ -469,6 +501,11 @@ void handleRoot(AsyncWebServerRequest *request) {
                 html += "Button: <span class='ok'>" + String(MyEspUsbHost.lastMouseButton.description) + "</span>";
                 html += " <span class='dim'>&mdash; " + elapsedStr(MyEspUsbHost.lastMouseButton.time) + "</span><br>";
                 html += "<span class='dim'>Total clicks: " + String(MyEspUsbHost.lastMouseButton.totalClicks) + "</span><br>";
+                if (MyEspUsbHost.lastMouseButton.lastClickIntervalMs != 0) {
+                    html += "<span class='dim'>Last same-button click interval: " +
+                            String(MyEspUsbHost.lastMouseButton.lastClickIntervalMs) +
+                            " ms</span><br>";
+                }
             }
             if (MyEspUsbHost.lastMouseButton.lastDoubleClickTime == 0) {
                 html += "<span class='none'>No double-click yet</span>";
@@ -525,7 +562,7 @@ void handleRoot(AsyncWebServerRequest *request) {
     // Build the table (newest entry first)
     html += "<table><tr><th>Age</th><th>rawLen</th><th>rawData</th>"
             "<th>rptLen</th><th>rptData</th>"
-            "<th>lib&nbsp;x</th><th>lib&nbsp;y</th><th>lib&nbsp;w</th><th>btn</th></tr>";
+            "<th>lib&nbsp;x</th><th>lib&nbsp;y</th><th>lib&nbsp;w</th><th>lib&nbsp;btn</th><th>decoded&nbsp;btn</th></tr>";
 
     uint8_t head = MyEspUsbHost.mouseRawHead;
     for (uint8_t i = 0; i < MyEspUsbHostClass::MOUSE_RAW_LOG_SIZE; i++) {
@@ -553,7 +590,9 @@ void handleRoot(AsyncWebServerRequest *request) {
         html += "<td>" + String(e.libY)  + "</td>";
         html += "<td>" + String(e.libWheel) + "</td>";
         char btnbuf[5]; snprintf(btnbuf, sizeof(btnbuf), "0x%02X", e.libButtons);
-        html += "<td>" + String(btnbuf) + "</td></tr>";
+        html += "<td>" + String(btnbuf) + "</td>";
+        char decodedBtnBuf[5]; snprintf(decodedBtnBuf, sizeof(decodedBtnBuf), "0x%02X", e.decodedButtons);
+        html += "<td>" + String(decodedBtnBuf) + "</td></tr>";
     }
     html += "</table></div>";
 

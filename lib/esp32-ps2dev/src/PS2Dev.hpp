@@ -19,7 +19,7 @@ const uint32_t DEFAULT_BYTE_INTERVAL_MICROS = 100;
 // The device should check for "HOST_REQUEST_TO_SEND" at a interval not exceeding 10 milliseconds.
 const uint32_t INTERVAL_CHECKING_HOST_SEND_REQUEST_MILLIS = 9;
 
-const int PACKET_QUEUE_LENGTH = 20;
+const int PACKET_QUEUE_LENGTH = 64;
 const UBaseType_t DEFAULT_TASK_PRIORITY = 10;
 const BaseType_t DEFAULT_TASK_CORE = APP_CPU_NUM;
 
@@ -47,7 +47,7 @@ class PS2dev {
   BusState get_bus_state();
   SemaphoreHandle_t get_bus_mutex_handle();
   QueueHandle_t get_packet_queue_handle();
-  int send_packet_to_queue(const PS2Packet& packet);
+  int send_packet_to_queue(const PS2Packet& packet, TickType_t ticks_to_wait = 0);
   void set_clk_half_period_micros(uint32_t clk_half_period_micros);
   void set_byte_interval_micros(uint32_t byte_interval_micros);
   uint32_t get_clk_half_period_micros();
