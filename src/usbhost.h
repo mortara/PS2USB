@@ -29,6 +29,13 @@ public:
         volatile int16_t x = 0;
         volatile int16_t y = 0;
         volatile int16_t wheel = 0;
+        volatile int16_t ps2X = 0;
+        volatile int16_t ps2Y = 0;
+        volatile int32_t totalX = 0;
+        volatile int32_t totalY = 0;
+        volatile int32_t totalPs2X = 0;
+        volatile int32_t totalPs2Y = 0;
+        volatile int32_t totalWheel = 0;
         volatile uint32_t totalMoves = 0;
     } lastMouseMove;
 
@@ -63,6 +70,8 @@ public:
         uint8_t  data[512] = {};
         bool     valid = false;
     } hidDesc;
+
+    volatile unsigned long ignoreMouseMoveUntil = 0;
 
     // Parsed mouse report layout derived from the HID descriptor.
     // Bit offsets are relative to the report payload (after the library strips the report-ID byte).

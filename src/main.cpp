@@ -138,6 +138,7 @@ void Task1code( void * parameter) {
     pmCommonLib.WebServer.RegisterOn("/reboot", handleReboot, HTTP_POST);
     pmCommonLib.WebServer.RegisterOn("/ps2/keyboard", handleKeyboardEvent, HTTP_POST);
     pmCommonLib.WebServer.RegisterOn("/ps2/mouse", handleMouseEvent, HTTP_POST);
+    pmCommonLib.WebServer.RegisterOn("/ps2/mouse/timing", handleMouseTiming, HTTP_POST);
     pmCommonLib.WebServer.RegisterOn("/", handleRoot, HTTP_GET);
 
     
@@ -191,6 +192,9 @@ void Task2code( void * parameter) {
                     break;
                 case PS2CmdType::MOUSE_CLICK:
                     PS2Devices.ClickMouseButton(cmd.mouseBtn.button);
+                    break;
+                case PS2CmdType::SET_MOUSE_TIMING:
+                    PS2Devices.SetMouseTiming(cmd.mouseTiming.clockHalfMicros, cmd.mouseTiming.byteIntervalMicros);
                     break;
                 case PS2CmdType::KEY_DOWN:
                     PS2Devices.KeyDown(cmd.key.key);

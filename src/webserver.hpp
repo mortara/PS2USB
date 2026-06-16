@@ -144,6 +144,13 @@ void handleMouseEvent(AsyncWebServerRequest *request) {
             MyEspUsbHost.lastMouseMove.x = dx;
             MyEspUsbHost.lastMouseMove.y = dy;
             MyEspUsbHost.lastMouseMove.wheel = wheel;
+            MyEspUsbHost.lastMouseMove.ps2X = dx;
+            MyEspUsbHost.lastMouseMove.ps2Y = dy;
+            MyEspUsbHost.lastMouseMove.totalX += dx;
+            MyEspUsbHost.lastMouseMove.totalY += dy;
+            MyEspUsbHost.lastMouseMove.totalPs2X += dx;
+            MyEspUsbHost.lastMouseMove.totalPs2Y += dy;
+            MyEspUsbHost.lastMouseMove.totalWheel += wheel;
             MyEspUsbHost.lastMouseMove.totalMoves++;
             pmLogging.LogLn("[WEB] Mouse move dx=" + String(dx) + " dy=" + String(dy) + " wheel=" + String(wheel));
         }
@@ -187,6 +194,21 @@ void handleMouseEvent(AsyncWebServerRequest *request) {
     }
 
     request->send(400, "text/plain", "Unsupported mouse event");
+}
+
+void handleMouseTiming(AsyncWebServerRequest *request) {
+    uint16_t clockHalf = (uint16_t)postInt(request, "clockHalf", PS2Devices.GetMouseClockHalfPeriodMicros(), 30, 80);
+    uint16_t byteInterval = (uint16_t)postInt(request, "byteInterval", PS2Devices.GetMouseByteIntervalMicros(), 50, 2000);
+
+    PS2Cmd cmd;
+    cmd.type = PS2CmdType::SET_MOUSE_TIMING;
+    cmd.mouseTiming.clockHalfMicros = clockHalf;
+    cmd.mouseTiming.byteIntervalMicros = byteInterval;
+    ps2Enqueue(cmd);
+
+    pmLogging.LogLn("[WEB] Mouse timing clockHalf=" + String(clockHalf) +
+                    "us byteInterval=" + String(byteInterval) + "us");
+    request->redirect("/");
 }
 
 void handleRoot(AsyncWebServerRequest *request) {
@@ -380,6 +402,25 @@ void handleRoot(AsyncWebServerRequest *request) {
 
         if (hasMouse) {
             html += "<div class='card'><b>Mouse</b><br>";
+            uint8_t sampleRate = PS2Devices.GetMouseSampleRate();
+            if (sampleRate) {
+                html += "<span class='dim'>PS/2 sample rate: " + String(sampleRate) +
+                        " Hz (" + String(PS2Devices.GetMouseReportIntervalMs()) + " ms)</span><br>";
+            }
+            html += "<span class='dim'>PS/2 resolution: " + String(1 << PS2Devices.GetMouseResolutionCode()) +
+                    " count/mm";
+            html += " &nbsp; scaling: " + String(PS2Devices.GetMouseScaleCode() ? "2:1" : "1:1");
+            html += " &nbsp; mode: " + String(PS2Devices.GetMouseModeCode() == 0 ? "remote" :
+                                             (PS2Devices.GetMouseModeCode() == 1 ? "stream" : "wrap"));
+            html += " &nbsp; reporting: " + String(PS2Devices.IsMouseDataReportingEnabled() ? "on" : "off") +
+                    "</span><br>";
+            html += "<form class='controls' method='POST' action='/ps2/mouse/timing'>"
+                    "<label>Clock half us<br><input class='num' type='number' name='clockHalf' min='30' max='80' value='" +
+                    String(PS2Devices.GetMouseClockHalfPeriodMicros()) + "'></label>"
+                    "<label>Byte gap us<br><input class='num' type='number' name='byteInterval' min='50' max='2000' value='" +
+                    String(PS2Devices.GetMouseByteIntervalMicros()) + "'></label>"
+                    "<button type='submit'>Apply</button>"
+                    "</form>";
 
             // Movement
             if (MyEspUsbHost.lastMouseMove.time == 0) {
@@ -391,6 +432,15 @@ void handleRoot(AsyncWebServerRequest *request) {
                     html += " wheel=" + String(MyEspUsbHost.lastMouseMove.wheel);
                 html += "</span>";
                 html += " <span class='dim'>&mdash; " + elapsedStr(MyEspUsbHost.lastMouseMove.time) + "</span><br>";
+                html += "<span class='dim'>PS/2 sent: dx=" + String(MyEspUsbHost.lastMouseMove.ps2X) +
+                        " dy=" + String(MyEspUsbHost.lastMouseMove.ps2Y) + "</span><br>";
+                html += "<span class='dim'>Cumulative: dx=" + String(MyEspUsbHost.lastMouseMove.totalX) +
+                        " dy=" + String(MyEspUsbHost.lastMouseMove.totalY);
+                if (MyEspUsbHost.lastMouseMove.totalWheel != 0)
+                    html += " wheel=" + String(MyEspUsbHost.lastMouseMove.totalWheel);
+                html += "</span><br>";
+                html += "<span class='dim'>PS/2 cumulative: dx=" + String(MyEspUsbHost.lastMouseMove.totalPs2X) +
+                        " dy=" + String(MyEspUsbHost.lastMouseMove.totalPs2Y) + "</span><br>";
                 html += "<span class='dim'>Total moves: " + String(MyEspUsbHost.lastMouseMove.totalMoves) + "</span><br>";
             }
 

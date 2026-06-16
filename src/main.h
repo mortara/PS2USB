@@ -12,6 +12,7 @@ enum class PS2CmdType : uint8_t {
     MOUSE_PRESS,
     MOUSE_RELEASE,
     MOUSE_CLICK,
+    SET_MOUSE_TIMING,
     KEY_DOWN,
     KEY_UP,
     TYPE_TEXT,
@@ -22,6 +23,7 @@ struct PS2Cmd {
     union {
         struct { int16_t x; int16_t y; int8_t wheel; } move;
         struct { esp32_ps2dev::PS2Mouse::Button button; } mouseBtn;
+        struct { uint16_t clockHalfMicros; uint16_t byteIntervalMicros; } mouseTiming;
         struct { esp32_ps2dev::scancodes::Key key; } key;
         char text[241];
     };

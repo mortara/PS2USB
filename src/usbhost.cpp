@@ -114,6 +114,7 @@ esp32_ps2dev::scancodes::Key USBKeyCodeToPS2ScanCode(uint8_t keycode)
 // Extract a signed integer of 'bitSize' bits from 'data' starting at 'bitOffset'.
 // Returns 0 if the field does not fit entirely within dataLen bytes.
 static int32_t extractBitsSigned(const uint8_t *data, uint16_t dataLen, uint16_t bitOffset, uint8_t bitSize) {
+    if (!data) return 0;
     if (bitSize == 0 || bitSize > 32) return 0;
     uint16_t byteStart   = bitOffset / 8;
     uint8_t  bitShift    = bitOffset % 8;
@@ -128,6 +129,37 @@ static int32_t extractBitsSigned(const uint8_t *data, uint16_t dataLen, uint16_t
     raw &= mask;
     if (raw & (1u << (bitSize - 1))) raw |= ~mask;  // sign-extend
     return (int32_t)raw;
+}
+
+static bool selectMouseReportPayload(const EspUsbHostMouseEvent &evt,
+                                     const MyEspUsbHostClass::HidMouseLayout &layout,
+                                     const uint8_t *&payload,
+                                     uint16_t &payloadLen) {
+    payload = nullptr;
+    payloadLen = 0;
+
+    const auto useReportData = [&]() -> bool {
+        if (!evt.reportData || evt.reportLength == 0) return false;
+        payload = (const uint8_t *)evt.reportData;
+        payloadLen = (uint16_t)evt.reportLength;
+        return true;
+    };
+
+    if (layout.reportId == 0) return useReportData();
+
+    if (evt.rawData && evt.rawLength > 1 && evt.rawData[0] == layout.reportId) {
+        payload = (const uint8_t *)evt.rawData + 1;
+        payloadLen = (uint16_t)(evt.rawLength - 1);
+        return true;
+    }
+
+    if (evt.reportData && evt.reportLength > 1 && evt.reportData[0] == layout.reportId) {
+        payload = (const uint8_t *)evt.reportData + 1;
+        payloadLen = (uint16_t)(evt.reportLength - 1);
+        return true;
+    }
+
+    return useReportData();
 }
 
 // Walk a raw HID report descriptor and extract the mouse report layout.
@@ -274,6 +306,7 @@ void MyEspUsbHostClass::init()
     usb.onDeviceConnected([](const EspUsbHostDeviceInfo& info) {
         MyEspUsbHost.cachedVid = info.vid;
         MyEspUsbHost.cachedPid = info.pid;
+        MyEspUsbHost.ignoreMouseMoveUntil = millis() + 3000;
         strncpy(MyEspUsbHost.cachedManufacturer, info.manufacturer, sizeof(MyEspUsbHost.cachedManufacturer) - 1);
         MyEspUsbHost.cachedManufacturer[sizeof(MyEspUsbHost.cachedManufacturer) - 1] = '\0';
         strncpy(MyEspUsbHost.cachedProduct, info.product, sizeof(MyEspUsbHost.cachedProduct) - 1);
@@ -296,12 +329,20 @@ void MyEspUsbHostClass::init()
         MyEspUsbHost.lastMouseMove.x = 0;
         MyEspUsbHost.lastMouseMove.y = 0;
         MyEspUsbHost.lastMouseMove.wheel = 0;
+        MyEspUsbHost.lastMouseMove.ps2X = 0;
+        MyEspUsbHost.lastMouseMove.ps2Y = 0;
+        MyEspUsbHost.lastMouseMove.totalX = 0;
+        MyEspUsbHost.lastMouseMove.totalY = 0;
+        MyEspUsbHost.lastMouseMove.totalPs2X = 0;
+        MyEspUsbHost.lastMouseMove.totalPs2Y = 0;
+        MyEspUsbHost.lastMouseMove.totalWheel = 0;
         MyEspUsbHost.lastMouseMove.totalMoves = 0;
         MyEspUsbHost.lastMouseButton.time = 0;
         MyEspUsbHost.lastMouseButton.description[0] = '\0';
         MyEspUsbHost.hidDesc.valid = false;
         MyEspUsbHost.hidDesc.length = 0;
         MyEspUsbHost.mouseLayout = {};
+        MyEspUsbHost.ignoreMouseMoveUntil = 0;
     });
 
     usb.onHIDReportDescriptor([](const EspUsbHostHIDReportDescriptor& desc) {
@@ -395,21 +436,21 @@ void MyEspUsbHostClass::init()
         uint8_t buttons = evt.buttons & 0x07;
 
         const auto &layout = MyEspUsbHost.mouseLayout;
-        if (layout.valid && evt.reportData && evt.reportLength > 0) {
-            const uint8_t *rpt   = (const uint8_t *)evt.reportData;
-            uint16_t       rptLen = (uint16_t)evt.reportLength;
-            // The EspUsbHost library strips the report-ID byte before handing us reportData,
-            // so our descriptor-derived bit offsets (which exclude the ID byte) are correct as-is.
-            x = (int16_t)extractBitsSigned(rpt, rptLen, layout.xBitOffset, layout.xBitSize);
-            y = (int16_t)extractBitsSigned(rpt, rptLen, layout.yBitOffset, layout.yBitSize);
-            if (layout.wheelPresent)
-                wheel = (int8_t)constrain(extractBitsSigned(rpt, rptLen, layout.wheelBitOffset, layout.wheelBitSize), -128, 127);
-            else
-                wheel = 0;
-            buttons = 0;
-            for (uint8_t b = 0; b < layout.buttonCount && b < 8; b++) {
-                if (extractBitsSigned(rpt, rptLen, layout.buttonBitOffset + b, 1) & 1)
-                    buttons |= (uint8_t)(1u << b);
+        if (layout.valid) {
+            const uint8_t *rpt = nullptr;
+            uint16_t rptLen = 0;
+            if (selectMouseReportPayload(evt, layout, rpt, rptLen)) {
+                x = (int16_t)extractBitsSigned(rpt, rptLen, layout.xBitOffset, layout.xBitSize);
+                y = (int16_t)extractBitsSigned(rpt, rptLen, layout.yBitOffset, layout.yBitSize);
+                if (layout.wheelPresent)
+                    wheel = (int8_t)constrain(extractBitsSigned(rpt, rptLen, layout.wheelBitOffset, layout.wheelBitSize), -128, 127);
+                else
+                    wheel = 0;
+                buttons = 0;
+                for (uint8_t b = 0; b < layout.buttonCount && b < 8; b++) {
+                    if (extractBitsSigned(rpt, rptLen, layout.buttonBitOffset + b, 1) & 1)
+                        buttons |= (uint8_t)(1u << b);
+                }
             }
         }
 
@@ -423,6 +464,10 @@ void MyEspUsbHostClass::init()
         bool moved       = (x != 0 || y != 0 || wheel != 0);
         bool btnsChanged = (buttons != previousButtons);
 
+        if (moved && millis() < MyEspUsbHost.ignoreMouseMoveUntil) {
+            moved = false;
+        }
+
         if (moved) {
             // Clamp to ±127 before handing to the PS/2 library.
             // The PS/2 protocol sets overflow bits when |value| > 255, and many
@@ -433,11 +478,20 @@ void MyEspUsbHostClass::init()
             auto clamp7 = [](int16_t v) -> int16_t {
                 return v > 127 ? 127 : (v < -127 ? -127 : v);
             };
-            PS2Devices.MoveMouse(clamp7(x), clamp7((int16_t)-y), wheel);
+            int16_t ps2X = clamp7(x);
+            int16_t ps2Y = clamp7((int16_t)-y);
+            PS2Devices.MoveMouse(ps2X, ps2Y, wheel);
             MyEspUsbHost.lastMouseMove.time = millis();
             MyEspUsbHost.lastMouseMove.x = x;
             MyEspUsbHost.lastMouseMove.y = y;
             MyEspUsbHost.lastMouseMove.wheel = wheel;
+            MyEspUsbHost.lastMouseMove.ps2X = ps2X;
+            MyEspUsbHost.lastMouseMove.ps2Y = ps2Y;
+            MyEspUsbHost.lastMouseMove.totalX += x;
+            MyEspUsbHost.lastMouseMove.totalY += y;
+            MyEspUsbHost.lastMouseMove.totalPs2X += ps2X;
+            MyEspUsbHost.lastMouseMove.totalPs2Y += ps2Y;
+            MyEspUsbHost.lastMouseMove.totalWheel += wheel;
             MyEspUsbHost.lastMouseMove.totalMoves++;
         }
 
