@@ -66,6 +66,13 @@ bool parseMouseButton(const String& value, esp32_ps2dev::PS2Mouse::Button& butto
     return false;
 }
 
+uint8_t mouseButtonIndex(esp32_ps2dev::PS2Mouse::Button button) {
+    if (button == esp32_ps2dev::PS2Mouse::Button::LEFT) return 0;
+    if (button == esp32_ps2dev::PS2Mouse::Button::RIGHT) return 1;
+    if (button == esp32_ps2dev::PS2Mouse::Button::MIDDLE) return 2;
+    return 0xFF;
+}
+
 void handleReboot(AsyncWebServerRequest *request) {
     request->send(200, "text/html",
         "<html><body><p>Rebooting&hellip;</p>"
@@ -173,21 +180,26 @@ void handleMouseEvent(AsyncWebServerRequest *request) {
         if (action == "down") {
             cmd.type = PS2CmdType::MOUSE_PRESS;
             ps2Enqueue(cmd);
+            MyEspUsbHost.RecordMouseButtonEvent(label, "pressed");
         } else if (action == "up") {
             cmd.type = PS2CmdType::MOUSE_RELEASE;
             ps2Enqueue(cmd);
+            MyEspUsbHost.RecordMouseButtonEvent(label, "released");
+            MyEspUsbHost.RecordMouseClick(mouseButtonIndex(button));
         } else if (action == "click") {
             cmd.type = PS2CmdType::MOUSE_CLICK;
             ps2Enqueue(cmd);
+            MyEspUsbHost.RecordMouseButtonEvent(label, "click");
+            MyEspUsbHost.RecordMouseClick(mouseButtonIndex(button));
+        } else if (action == "doubleclick") {
+            cmd.type = PS2CmdType::MOUSE_DOUBLE_CLICK;
+            ps2Enqueue(cmd);
+            MyEspUsbHost.RecordMouseButtonEvent(label, "double-click");
+            MyEspUsbHost.RecordMouseDoubleClick(mouseButtonIndex(button), PS2Devices.GetMouseDoubleClickGapMillis());
         } else {
             request->send(400, "text/plain", "Unsupported mouse button action");
             return;
         }
-
-        snprintf(MyEspUsbHost.lastMouseButton.description,
-                 sizeof(MyEspUsbHost.lastMouseButton.description),
-                 "%s %s", label, action.c_str());
-        MyEspUsbHost.lastMouseButton.time = millis();
         pmLogging.LogLn("[WEB] Mouse " + String(label) + " " + action);
         request->redirect("/");
         return;
@@ -249,6 +261,7 @@ void handleRoot(AsyncWebServerRequest *request) {
         "th{background:#000088;color:#fff}"
         ".none{color:#880000}"
         ".ok{color:#006600;font-weight:bold}"
+        ".hot{color:#cc5500;font-weight:bold}"
         ".dim{color:#666;font-size:0.9em}"
         ".card{background:#bbb;border:1px solid #999;border-radius:4px;padding:8px 14px;margin:6px 0;display:inline-block;min-width:260px;vertical-align:top}"
         ".wide{min-width:340px;max-width:720px}"
@@ -378,6 +391,7 @@ void handleRoot(AsyncWebServerRequest *request) {
             "</select></label>"
             "<label>Action<br><select name='action'>"
             "<option value='click'>Click</option>"
+            "<option value='doubleclick'>Double Click</option>"
             "<option value='down'>Down</option>"
             "<option value='up'>Up</option>"
             "</select></label>"
@@ -407,6 +421,10 @@ void handleRoot(AsyncWebServerRequest *request) {
                 html += "<span class='dim'>PS/2 sample rate: " + String(sampleRate) +
                         " Hz (" + String(PS2Devices.GetMouseReportIntervalMs()) + " ms)</span><br>";
             }
+            html += "<span class='dim'>PS/2 click timing: down " +
+                    String(PS2Devices.GetMouseClickPressMillis()) +
+                    " ms, double gap " +
+                    String(PS2Devices.GetMouseDoubleClickGapMillis()) + " ms</span><br>";
             html += "<span class='dim'>PS/2 resolution: " + String(1 << PS2Devices.GetMouseResolutionCode()) +
                     " count/mm";
             html += " &nbsp; scaling: " + String(PS2Devices.GetMouseScaleCode() ? "2:1" : "1:1");
@@ -446,10 +464,25 @@ void handleRoot(AsyncWebServerRequest *request) {
 
             // Buttons
             if (MyEspUsbHost.lastMouseButton.time == 0) {
-                html += "<span class='none'>No button event yet</span>";
+                html += "<span class='none'>No button event yet</span><br>";
             } else {
                 html += "Button: <span class='ok'>" + String(MyEspUsbHost.lastMouseButton.description) + "</span>";
-                html += " <span class='dim'>&mdash; " + elapsedStr(MyEspUsbHost.lastMouseButton.time) + "</span>";
+                html += " <span class='dim'>&mdash; " + elapsedStr(MyEspUsbHost.lastMouseButton.time) + "</span><br>";
+                html += "<span class='dim'>Total clicks: " + String(MyEspUsbHost.lastMouseButton.totalClicks) + "</span><br>";
+            }
+            if (MyEspUsbHost.lastMouseButton.lastDoubleClickTime == 0) {
+                html += "<span class='none'>No double-click yet</span>";
+            } else {
+                unsigned long doubleClickAge = millis() - MyEspUsbHost.lastMouseButton.lastDoubleClickTime;
+                html += "Double-click: <span class='" + String(doubleClickAge < 3000 ? "hot" : "ok") + "'>" +
+                        String(MyEspUsbHost.lastMouseButton.doubleClickDescription) + "</span>";
+                html += " <span class='dim'>&mdash; " +
+                        elapsedStr(MyEspUsbHost.lastMouseButton.lastDoubleClickTime) +
+                        ", interval " +
+                        String(MyEspUsbHost.lastMouseButton.lastClickIntervalMs) +
+                        " ms, total " +
+                        String(MyEspUsbHost.lastMouseButton.totalDoubleClicks) +
+                        "</span>";
             }
 
             html += "</div>";

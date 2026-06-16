@@ -31,11 +31,14 @@ class PS2DevicesClass
         bool IsMouseDataReportingEnabled();
         uint16_t GetMouseClockHalfPeriodMicros();
         uint16_t GetMouseByteIntervalMicros();
+        uint16_t GetMouseClickPressMillis();
+        uint16_t GetMouseDoubleClickGapMillis();
         void SetMouseTiming(uint16_t clockHalfMicros, uint16_t byteIntervalMicros);
         void MoveMouse(int16_t x, int16_t y, int8_t wheel);
         void PressMouseButton(esp32_ps2dev::PS2Mouse::Button button);
         void ReleaseMouseButton(esp32_ps2dev::PS2Mouse::Button button);
         void ClickMouseButton(esp32_ps2dev::PS2Mouse::Button button);
+        void DoubleClickMouseButton(esp32_ps2dev::PS2Mouse::Button button);
 };
 
 

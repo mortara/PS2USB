@@ -193,6 +193,9 @@ void Task2code( void * parameter) {
                 case PS2CmdType::MOUSE_CLICK:
                     PS2Devices.ClickMouseButton(cmd.mouseBtn.button);
                     break;
+                case PS2CmdType::MOUSE_DOUBLE_CLICK:
+                    PS2Devices.DoubleClickMouseButton(cmd.mouseBtn.button);
+                    break;
                 case PS2CmdType::SET_MOUSE_TIMING:
                     PS2Devices.SetMouseTiming(cmd.mouseTiming.clockHalfMicros, cmd.mouseTiming.byteIntervalMicros);
                     break;

@@ -12,6 +12,7 @@ enum class PS2CmdType : uint8_t {
     MOUSE_PRESS,
     MOUSE_RELEASE,
     MOUSE_CLICK,
+    MOUSE_DOUBLE_CLICK,
     SET_MOUSE_TIMING,
     KEY_DOWN,
     KEY_UP,

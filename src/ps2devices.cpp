@@ -2,6 +2,8 @@
 
 static const uint16_t DEFAULT_MOUSE_CLK_HALF_MICROS = 50;
 static const uint16_t DEFAULT_MOUSE_BYTE_INTERVAL_MICROS = 500;
+static const uint16_t MOUSE_CLICK_PRESS_MILLIS = 70;
+static const uint16_t MOUSE_DOUBLE_CLICK_GAP_MILLIS = 120;
 
 PS2DevicesClass::~PS2DevicesClass()
 {
@@ -101,6 +103,16 @@ uint16_t PS2DevicesClass::GetMouseByteIntervalMicros()
     return _mouse ? _mouse->get_byte_interval_micros() : DEFAULT_MOUSE_BYTE_INTERVAL_MICROS;
 }
 
+uint16_t PS2DevicesClass::GetMouseClickPressMillis()
+{
+    return MOUSE_CLICK_PRESS_MILLIS;
+}
+
+uint16_t PS2DevicesClass::GetMouseDoubleClickGapMillis()
+{
+    return MOUSE_DOUBLE_CLICK_GAP_MILLIS;
+}
+
 void PS2DevicesClass::SetMouseTiming(uint16_t clockHalfMicros, uint16_t byteIntervalMicros)
 {
     if (!_mouse) return;
@@ -126,7 +138,18 @@ void PS2DevicesClass::ReleaseMouseButton(esp32_ps2dev::PS2Mouse::Button button)
 
 void PS2DevicesClass::ClickMouseButton(esp32_ps2dev::PS2Mouse::Button button)
 {
-    _mouse->click(button);
+    if (!_mouse) return;
+    PressMouseButton(button);
+    delay(MOUSE_CLICK_PRESS_MILLIS);
+    ReleaseMouseButton(button);
+}
+
+void PS2DevicesClass::DoubleClickMouseButton(esp32_ps2dev::PS2Mouse::Button button)
+{
+    if (!_mouse) return;
+    ClickMouseButton(button);
+    delay(MOUSE_DOUBLE_CLICK_GAP_MILLIS);
+    ClickMouseButton(button);
 }
 
 PS2DevicesClass PS2Devices;

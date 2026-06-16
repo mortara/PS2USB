@@ -42,6 +42,14 @@ public:
     struct MouseButtonActivity {
         volatile unsigned long time = 0;
         char description[32] = {};
+        volatile unsigned long lastClickTime = 0;
+        volatile unsigned long lastClickIntervalMs = 0;
+        volatile unsigned long lastDoubleClickTime = 0;
+        volatile uint32_t totalClicks = 0;
+        volatile uint32_t totalDoubleClicks = 0;
+        volatile uint8_t lastClickButton = 0xFF;
+        volatile uint8_t lastDoubleClickButton = 0xFF;
+        char doubleClickDescription[32] = {};
     } lastMouseButton;
 
     // Ring buffer of raw USB mouse reports for diagnostics
@@ -99,6 +107,9 @@ public:
 
     void init();
     void DisplayInfo();
+    void RecordMouseButtonEvent(const char *label, const char *action);
+    void RecordMouseClick(uint8_t buttonIndex);
+    void RecordMouseDoubleClick(uint8_t buttonIndex, unsigned long intervalMs);
 };
 
 extern MyEspUsbHostClass MyEspUsbHost;

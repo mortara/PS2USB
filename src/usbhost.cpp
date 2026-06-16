@@ -299,6 +299,56 @@ static bool parseHIDMouseLayout(const uint8_t *desc, uint16_t len,
     return true;
 }
 
+static const unsigned long DOUBLE_CLICK_WINDOW_MS = 500;
+
+static const char *mouseButtonName(uint8_t buttonIndex) {
+    switch (buttonIndex) {
+        case 0: return "Left";
+        case 1: return "Right";
+        case 2: return "Middle";
+        default: return "Unknown";
+    }
+}
+
+void MyEspUsbHostClass::RecordMouseButtonEvent(const char *label, const char *action)
+{
+    snprintf(lastMouseButton.description,
+             sizeof(lastMouseButton.description),
+             "%s %s", label, action);
+    lastMouseButton.time = millis();
+}
+
+void MyEspUsbHostClass::RecordMouseClick(uint8_t buttonIndex)
+{
+    unsigned long now = millis();
+    unsigned long previousClickTime = lastMouseButton.lastClickTime;
+    uint8_t previousButton = lastMouseButton.lastClickButton;
+
+    lastMouseButton.totalClicks++;
+    lastMouseButton.lastClickTime = now;
+    lastMouseButton.lastClickButton = buttonIndex;
+
+    if (previousClickTime != 0 &&
+        previousButton == buttonIndex &&
+        now - previousClickTime <= DOUBLE_CLICK_WINDOW_MS) {
+        RecordMouseDoubleClick(buttonIndex, now - previousClickTime);
+    }
+}
+
+void MyEspUsbHostClass::RecordMouseDoubleClick(uint8_t buttonIndex, unsigned long intervalMs)
+{
+    unsigned long now = millis();
+    lastMouseButton.lastDoubleClickTime = now;
+    lastMouseButton.lastDoubleClickButton = buttonIndex;
+    lastMouseButton.lastClickTime = now;
+    lastMouseButton.lastClickButton = buttonIndex;
+    lastMouseButton.lastClickIntervalMs = intervalMs;
+    lastMouseButton.totalDoubleClicks++;
+    snprintf(lastMouseButton.doubleClickDescription,
+             sizeof(lastMouseButton.doubleClickDescription),
+             "%s double-click", mouseButtonName(buttonIndex));
+}
+
 void MyEspUsbHostClass::init()
 {
     usb.setKeyboardLayout(ESP_USB_HOST_KEYBOARD_LAYOUT_DE_DE);
@@ -339,6 +389,14 @@ void MyEspUsbHostClass::init()
         MyEspUsbHost.lastMouseMove.totalMoves = 0;
         MyEspUsbHost.lastMouseButton.time = 0;
         MyEspUsbHost.lastMouseButton.description[0] = '\0';
+        MyEspUsbHost.lastMouseButton.lastClickTime = 0;
+        MyEspUsbHost.lastMouseButton.lastClickIntervalMs = 0;
+        MyEspUsbHost.lastMouseButton.lastDoubleClickTime = 0;
+        MyEspUsbHost.lastMouseButton.totalClicks = 0;
+        MyEspUsbHost.lastMouseButton.totalDoubleClicks = 0;
+        MyEspUsbHost.lastMouseButton.lastClickButton = 0xFF;
+        MyEspUsbHost.lastMouseButton.lastDoubleClickButton = 0xFF;
+        MyEspUsbHost.lastMouseButton.doubleClickDescription[0] = '\0';
         MyEspUsbHost.hidDesc.valid = false;
         MyEspUsbHost.hidDesc.length = 0;
         MyEspUsbHost.mouseLayout = {};
@@ -502,36 +560,38 @@ void MyEspUsbHostClass::init()
                 if (buttons & 0x01) {
                     pmLogging.LogLn("Mouse LEFT pressed");
                     PS2Devices.PressMouseButton(esp32_ps2dev::PS2Mouse::Button::LEFT);
-                    strncpy(MyEspUsbHost.lastMouseButton.description, "Left pressed", 31);
+                    MyEspUsbHost.RecordMouseButtonEvent("Left", "pressed");
                 } else {
                     pmLogging.LogLn("Mouse LEFT released");
                     PS2Devices.ReleaseMouseButton(esp32_ps2dev::PS2Mouse::Button::LEFT);
-                    strncpy(MyEspUsbHost.lastMouseButton.description, "Left released", 31);
+                    MyEspUsbHost.RecordMouseButtonEvent("Left", "released");
+                    MyEspUsbHost.RecordMouseClick(0);
                 }
             }
             if (changed & 0x02) {
                 if (buttons & 0x02) {
                     pmLogging.LogLn("Mouse RIGHT pressed");
                     PS2Devices.PressMouseButton(esp32_ps2dev::PS2Mouse::Button::RIGHT);
-                    strncpy(MyEspUsbHost.lastMouseButton.description, "Right pressed", 31);
+                    MyEspUsbHost.RecordMouseButtonEvent("Right", "pressed");
                 } else {
                     pmLogging.LogLn("Mouse RIGHT released");
                     PS2Devices.ReleaseMouseButton(esp32_ps2dev::PS2Mouse::Button::RIGHT);
-                    strncpy(MyEspUsbHost.lastMouseButton.description, "Right released", 31);
+                    MyEspUsbHost.RecordMouseButtonEvent("Right", "released");
+                    MyEspUsbHost.RecordMouseClick(1);
                 }
             }
             if (changed & 0x04) {
                 if (buttons & 0x04) {
                     pmLogging.LogLn("Mouse MIDDLE pressed");
                     PS2Devices.PressMouseButton(esp32_ps2dev::PS2Mouse::Button::MIDDLE);
-                    strncpy(MyEspUsbHost.lastMouseButton.description, "Middle pressed", 31);
+                    MyEspUsbHost.RecordMouseButtonEvent("Middle", "pressed");
                 } else {
                     pmLogging.LogLn("Mouse MIDDLE released");
                     PS2Devices.ReleaseMouseButton(esp32_ps2dev::PS2Mouse::Button::MIDDLE);
-                    strncpy(MyEspUsbHost.lastMouseButton.description, "Middle released", 31);
+                    MyEspUsbHost.RecordMouseButtonEvent("Middle", "released");
+                    MyEspUsbHost.RecordMouseClick(2);
                 }
             }
-            MyEspUsbHost.lastMouseButton.time = millis();
         }
     });
 
