@@ -63,9 +63,28 @@ ESP32 PIN    |   Option
 
 The Pins are set to HIGH with internal pullups and the dip switch connects them to GND when set to ON
 
+## Mouse detection
+
+When a USB mouse connects, the adapter reads its **HID report descriptor** — the machine-readable table the device provides that describes the exact binary layout of its input reports. The descriptor is parsed once at connect time to extract:
+
+- **Buttons** — bit offset and count of button fields (usage page 0x09)
+- **X / Y axes** — bit offset, bit width, and logical min/max (Generic Desktop usages 0x30 / 0x31)
+- **Scroll wheel** — bit offset and bit width (usage 0x38), if present
+
+This means the adapter works correctly with any mouse regardless of whether it uses 8-bit, 12-bit, 16-bit, or other coordinate widths, and regardless of how many padding or extra fields the report contains. The parsed layout is logged at connect time, for example:
+
+```
+[USB] Mouse layout: reportId=2 buttons=8@bit0 X=12bit@16 Y=12bit@28 Wheel=8bit@52
+```
+
+Each incoming report is then decoded by extracting signed integers at the exact bit positions the descriptor specified, without any assumptions about byte boundaries or field order.
+
+If the descriptor cannot be parsed (e.g. the device does not expose one, or it contains no recognisable X/Y axes), the adapter falls back to the values the underlying EspUsbHost library provides, which handles standard boot-protocol mice correctly.
+
+Coordinates are clamped to ±127 before being forwarded over PS/2. The PS/2 protocol carries overflow flags for larger movements, but many retro host drivers react to those flags with wild cursor jumps or a mouse reset; clamping avoids that while staying well below the 255 overflow threshold even when the host applies its optional 2:1 scale mode.
+
 ## Problems
 
 Currently my main problem is the USB Host implementation on the ESP32:
  - It seems to have problems with USB hubs
- - Mice with high dpi (16bit coordinate values)
-   
+
