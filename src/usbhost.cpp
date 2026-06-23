@@ -110,9 +110,11 @@ esp32_ps2dev::scancodes::Key USBKeyCodeToPS2ScanCode(uint8_t keycode)
       case 0xE0: return esp32_ps2dev::scancodes::Key::K_LCTRL;
       case 0xE1: return esp32_ps2dev::scancodes::Key::K_LSHIFT;
       case 0xE2: return esp32_ps2dev::scancodes::Key::K_LALT;
+      case 0xE3: return esp32_ps2dev::scancodes::Key::K_LSUPER;
       case 0xE4: return esp32_ps2dev::scancodes::Key::K_RCTRL;
       case 0xE5: return esp32_ps2dev::scancodes::Key::K_RSHIFT;
       case 0xE6: return esp32_ps2dev::scancodes::Key::K_RALT;
+      case 0xE7: return esp32_ps2dev::scancodes::Key::K_RSUPER;
       default:
         return (esp32_ps2dev::scancodes::Key)(keycode - 3);
     }
@@ -218,10 +220,13 @@ static bool decodeReportIdMousePacket(const uint8_t *data,
     if (layout.valid && layout.reportId == data[0]) {
         x = (int16_t)extractBitsSigned(payload, payloadLen, layout.xBitOffset, layout.xBitSize);
         y = (int16_t)extractBitsSigned(payload, payloadLen, layout.yBitOffset, layout.yBitSize);
+        // If the descriptor walk didn't locate a wheel field, keep the
+        // boot-protocol byte-4 fallback computed above rather than zeroing it —
+        // some descriptors (e.g. wheel wrapped in a Push/Pop global block) aren't
+        // recognized by our flat descriptor walk even though the device does
+        // send wheel data in that byte position.
         if (layout.wheelPresent)
             wheel = (int8_t)constrain(extractBitsSigned(payload, payloadLen, layout.wheelBitOffset, layout.wheelBitSize), -128, 127);
-        else
-            wheel = 0;
 
         buttons = 0;
         for (uint8_t b = 0; b < layout.buttonCount && b < 8; b++) {
@@ -325,6 +330,17 @@ static void handleDecodedMouseMove(int16_t x, int16_t y, int8_t wheel) {
     };
     int16_t ps2X = clamp7(scaledX);
     int16_t ps2Y = clamp7((int16_t)-scaledY);
+
+    // TEMP DIAGNOSTIC: comparing raw USB deltas to scaled/ps2 deltas to check
+    // whether the mouse itself reports asymmetric X/Y resolution. Remove after diagnosis.
+    static uint32_t lastAxisLog = 0;
+    if (millis() - lastAxisLog > 200) {
+        lastAxisLog = millis();
+        pmLogging.LogLn("[AXIS] rawX=" + String(x) + " rawY=" + String(y) +
+                        " scaledX=" + String(scaledX) + " scaledY=" + String(scaledY) +
+                        " ps2X=" + String(ps2X) + " ps2Y=" + String(ps2Y));
+    }
+
     if (ps2X != 0 || ps2Y != 0 || wheel != 0) {
         PS2Devices.MoveMouse(ps2X, ps2Y, wheel);
     }
@@ -593,16 +609,24 @@ void MyEspUsbHostClass::init()
     usb.setKeyboardLayout(ESP_USB_HOST_KEYBOARD_LAYOUT_DE_DE);
 
     usb.onDeviceConnected([](const EspUsbHostDeviceInfo& info) {
+        pmLogging.LogLn("[USB] Connected: " + String(info.product) +
+                        " VID=0x" + String(info.vid, HEX) +
+                        " PID=0x" + String(info.pid, HEX) +
+                        (info.isHub ? " (hub)" : ""));
+
+        // A hub enumerating isn't the end device we care about — keep the
+        // watchdog armed so it can still recover if nothing shows up behind it.
+        if (info.isHub) return;
+
         MyEspUsbHost.cachedVid = info.vid;
         MyEspUsbHost.cachedPid = info.pid;
         MyEspUsbHost.ignoreMouseMoveUntil = millis() + 3000;
+        MyEspUsbHost.usbWatchdogDeadline = 0;
+        MyEspUsbHost.usbWatchdogRetries = 0;
         strncpy(MyEspUsbHost.cachedManufacturer, info.manufacturer, sizeof(MyEspUsbHost.cachedManufacturer) - 1);
         MyEspUsbHost.cachedManufacturer[sizeof(MyEspUsbHost.cachedManufacturer) - 1] = '\0';
         strncpy(MyEspUsbHost.cachedProduct, info.product, sizeof(MyEspUsbHost.cachedProduct) - 1);
         MyEspUsbHost.cachedProduct[sizeof(MyEspUsbHost.cachedProduct) - 1] = '\0';
-        pmLogging.LogLn("[USB] Connected: " + String(info.product) +
-                        " VID=0x" + String(info.vid, HEX) +
-                        " PID=0x" + String(info.pid, HEX));
     });
 
     usb.onDeviceDisconnected([](const EspUsbHostDeviceInfo& info) {
@@ -671,6 +695,41 @@ void MyEspUsbHostClass::init()
             MyEspUsbHost.hidDesc.protocol = input.protocol;
         }
 
+        // Boot-protocol keyboard reports: byte 0 is the modifier bitmask.
+        // Some composite devices instead prefix every report with a report-ID
+        // byte (0x01 for keyboard reports in this library), which shifts the
+        // modifier byte to index 1 — handleKeyboard() already strips that
+        // prefix before building events, so we must too.
+        // Separately, the library's onKeyboard callback only fires an event
+        // when one of the 6 regular keycode slots changes, so pressing or
+        // releasing a modifier key on its own (no other key held) produces no
+        // event there at all — that's why Shift/Ctrl/Alt "do nothing" when
+        // pressed alone. Track the raw modifier byte here instead, since this
+        // fires on every report regardless.
+        bool isReportIdKeyboard = input.data && input.length >= 9 &&
+                                  input.data[0] == 0x01 /* ESP_USB_HOST_HID_REPORT_ID_KEYBOARD */;
+        bool isBootKeyboard = input.protocol == 1 && !isReportIdKeyboard &&
+                              input.data && input.length >= 1;
+        if (isReportIdKeyboard || isBootKeyboard) {
+            static uint8_t lastRawModifiers = 0;
+            uint8_t mod = isReportIdKeyboard ? input.data[1] : input.data[0];
+            if (mod != lastRawModifiers) {
+                uint8_t changed = mod ^ lastRawModifiers;
+                auto chk = [&](uint8_t bit, esp32_ps2dev::scancodes::Key key) {
+                    if (!(changed & bit)) return;
+                    if (mod & bit) PS2Devices.KeyDown(key);
+                    else           PS2Devices.KeyUp(key);
+                };
+                chk(0x01, esp32_ps2dev::scancodes::Key::K_LCTRL);
+                chk(0x02, esp32_ps2dev::scancodes::Key::K_LSHIFT);
+                chk(0x04, esp32_ps2dev::scancodes::Key::K_LALT);
+                chk(0x10, esp32_ps2dev::scancodes::Key::K_RCTRL);
+                chk(0x20, esp32_ps2dev::scancodes::Key::K_RSHIFT);
+                chk(0x40, esp32_ps2dev::scancodes::Key::K_RALT);
+                lastRawModifiers = mod;
+            }
+        }
+
         if (looksLikeReportIdMousePacket((const uint8_t *)input.data,
                                          (uint16_t)input.length,
                                          input.data ? input.data[0] : 0)) {
@@ -705,28 +764,16 @@ void MyEspUsbHostClass::init()
     });
 
     usb.onKeyboard([](const EspUsbHostKeyboardEvent& evt) {
-        static uint8_t lastModifiers = 0;
-
-        // Track modifier key state changes and forward to PS/2
-        uint8_t mod = evt.modifiers;
-        if (mod != lastModifiers) {
-            uint8_t changed = mod ^ lastModifiers;
-            auto chk = [&](uint8_t bit, esp32_ps2dev::scancodes::Key key) {
-                if (!(changed & bit)) return;
-                if (mod & bit) PS2Devices.KeyDown(key);
-                else           PS2Devices.KeyUp(key);
-            };
-            chk(0x01, esp32_ps2dev::scancodes::Key::K_LCTRL);
-            chk(0x02, esp32_ps2dev::scancodes::Key::K_LSHIFT);
-            chk(0x04, esp32_ps2dev::scancodes::Key::K_LALT);
-            chk(0x10, esp32_ps2dev::scancodes::Key::K_RCTRL);
-            chk(0x20, esp32_ps2dev::scancodes::Key::K_RSHIFT);
-            chk(0x40, esp32_ps2dev::scancodes::Key::K_RALT);
-            lastModifiers = mod;
-        }
-
-        // Regular key press/release (skip modifier keycodes 0xE0+ to avoid double-fire)
-        if (evt.keycode == 0 || evt.keycode >= 0xE0) return;
+        // Modifier keys (Shift/Ctrl/Alt) are normally tracked from the raw
+        // modifier bitmask in onHIDInput above. But some devices report a
+        // modifier key (e.g. Left Shift) via the regular 6-key array instead
+        // of, or in addition to, the bitmask — that shows up here as a
+        // regular keycode event with evt.keycode in the 0xE0-0xE7 range.
+        // Forward those too via USBKeyCodeToPS2ScanCode (which maps them to
+        // the same PS/2 modifier keys) so devices that only do this still work.
+        // Resulting duplicate KeyDown/KeyUp calls when a device does both are
+        // harmless — they're idempotent from the PS/2 host's perspective.
+        if (evt.keycode == 0) return;
 
         if (evt.pressed) {
             pmLogging.LogLn("Key down: " + String(evt.keycode));
@@ -764,10 +811,11 @@ void MyEspUsbHostClass::init()
             if (selectMouseReportPayload(evt, layout, rpt, rptLen)) {
                 x = (int16_t)extractBitsSigned(rpt, rptLen, layout.xBitOffset, layout.xBitSize);
                 y = (int16_t)extractBitsSigned(rpt, rptLen, layout.yBitOffset, layout.yBitSize);
+                // Keep the library-provided wheel fallback (set above from evt.wheel)
+                // if the descriptor walk didn't find a wheel field — see comment in
+                // decodeReportIdMousePacket for why this isn't simply zeroed.
                 if (layout.wheelPresent)
                     wheel = (int8_t)constrain(extractBitsSigned(rpt, rptLen, layout.wheelBitOffset, layout.wheelBitSize), -128, 127);
-                else
-                    wheel = 0;
                 if (!hasReportIdPacketButtons) {
                     buttons = 0;
                     for (uint8_t b = 0; b < layout.buttonCount && b < 8; b++) {
@@ -819,6 +867,42 @@ void MyEspUsbHostClass::init()
     EspUsbHostConfig config;
     config.taskCore = 1;
     usb.begin(config);
+
+    usbWatchdogRetries = 0;
+    usbWatchdogDeadline = millis() + 4000;
+}
+
+// Some USB devices that are already plugged in at power-on aren't detected
+// by the ESP32-S3 USB-OTG peripheral on its first enumeration attempt, which
+// otherwise requires a manual power-cycle (sometimes several) to fix. Detect
+// that no device has shown up within a timeout and force a fresh
+// end()/begin() cycle, which redoes the bus reset and usually finds it.
+static const uint8_t  USB_WATCHDOG_MAX_RETRIES = 5;
+static const uint16_t USB_WATCHDOG_RETRY_MS    = 4000;
+
+void MyEspUsbHostClass::CheckUsbConnectionWatchdog()
+{
+    if (usbWatchdogDeadline == 0) return;
+    if (cachedVid != 0) {
+        usbWatchdogDeadline = 0;
+        return;
+    }
+    if (millis() < usbWatchdogDeadline) return;
+
+    if (usbWatchdogRetries >= USB_WATCHDOG_MAX_RETRIES) {
+        pmLogging.LogLn("[USB] No device detected after " + String(USB_WATCHDOG_MAX_RETRIES) + " restarts, giving up.");
+        usbWatchdogDeadline = 0;
+        return;
+    }
+
+    usbWatchdogRetries++;
+    pmLogging.LogLn("[USB] No device detected, restarting USB host (attempt " + String(usbWatchdogRetries) + ")");
+    usb.end();
+    delay(200);
+    EspUsbHostConfig config;
+    config.taskCore = 1;
+    usb.begin(config);
+    usbWatchdogDeadline = millis() + USB_WATCHDOG_RETRY_MS;
 }
 
 void MyEspUsbHostClass::DisplayInfo()

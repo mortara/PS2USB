@@ -109,7 +109,15 @@ public:
         uint8_t  wheelBitSize = 8;
     } mouseLayout;
 
+    // Watchdog state: forces a fresh usb.end()/usb.begin() cycle if no
+    // device has enumerated within a timeout after boot. Some USB devices
+    // that are already plugged in at power-on aren't detected by the
+    // ESP32-S3 USB-OTG peripheral on the first enumeration attempt.
+    unsigned long usbWatchdogDeadline = 0;
+    uint8_t       usbWatchdogRetries = 0;
+
     void init();
+    void CheckUsbConnectionWatchdog();
     void DisplayInfo();
     void LoadMouseSettings();
     bool SaveMouseSettings();

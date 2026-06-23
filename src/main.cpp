@@ -185,6 +185,7 @@ void Task2code( void * parameter) {
 
     PS2Cmd cmd;
     for(;;) {
+        MyEspUsbHost.CheckUsbConnectionWatchdog();
         // Block up to 10 ms waiting for the next command, then loop.
         while (xQueueReceive(ps2CmdQueue, &cmd, pdMS_TO_TICKS(10)) == pdTRUE) {
             switch (cmd.type) {
